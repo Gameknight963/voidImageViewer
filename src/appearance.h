@@ -104,9 +104,8 @@ static void appearance_update_glass(HWND hwnd,int height,int fullscreen)
     appearance_margins_t margins = {0,0,0,0};
     if (appearance_composition) appearance_composition(&composition);
     margins.bottom = config_bottom_glass && !appearance_high_contrast && !fullscreen && composition ? height : 0;
-    // Put the glass frame's bright lower edge beneath opaque image pixels,
-    // rather than aligning it with the bottom of the transparent menu bar.
-    margins.top = config_menu_glass && !appearance_high_contrast && !fullscreen && composition && GetMenu(hwnd) ? MulDiv(4,os_logical_high,96) : 0;
+    // Align the glass edge with the image area to retain the complete inner frame.
+    margins.top = config_menu_glass && !appearance_high_contrast && !fullscreen && composition && GetMenu(hwnd) ? 1 : 0;
     if (margins.top)
     {
         MENUBARINFO menu;
@@ -642,29 +641,32 @@ static int appearance_menu(HWND hwnd,UINT msg,LPARAM lp)
     return 0;
 }
 
-static void appearance_menu_border(HWND hwnd)
+static void appearance_menu_separator(HWND hwnd)
 {
-    MENUBARINFO menu;
     RECT window,client,line;
     POINT origin = {0,0};
     HDC dc;
     appearance_buffer_t buffer;
     if ((!appearance_dark && !appearance_menu_glass) || !GetMenu(hwnd)) return;
-    os_zero_memory(&menu,sizeof(menu));
-    menu.cbSize = sizeof(menu);
-    if (!GetMenuBarInfo(hwnd,OBJID_MENU,0,&menu)) return;
     GetWindowRect(hwnd,&window);
     GetClientRect(hwnd,&client);
     ClientToScreen(hwnd,&origin);
-    // Themes may paint the separator on the last menu row as well as in the
-    // non-client gap immediately above the image. Cover both after NC paint.
-    SetRect(&line,origin.x-window.left,menu.rcBar.bottom-window.top-1,
+    // Clear only the native menu separator. The glass frame edge on the row
+    // above it remains intact, matching the sides and bottom of the image.
+    SetRect(&line,origin.x-window.left,origin.y-window.top-1,
         origin.x-window.left+client.right,origin.y-window.top);
     dc = GetWindowDC(hwnd);
     if (dc)
     {
         if (appearance_begin(dc,&line,&buffer,appearance_menu_glass))
+        {
+            if (!appearance_menu_glass)
+            {
+                RECT fill = {0,0,buffer.width,buffer.height};
+                FillRect(buffer.dc,&fill,GetSysColorBrush(COLOR_3DSHADOW));
+            }
             appearance_end(dc,&line,&buffer,appearance_menu_glass);
+        }
         ReleaseDC(hwnd,dc);
     }
 }

@@ -2592,7 +2592,7 @@ static LRESULT CALLBACK _viv_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam
     if ((appearance_dark || appearance_menu_glass) && (msg == WM_NCPAINT || msg == WM_NCACTIVATE))
     {
         LRESULT result = DefWindowProc(hwnd,msg,wParam,lParam);
-        appearance_menu_border(hwnd);
+        appearance_menu_separator(hwnd);
         return result;
     }
     if (msg == WM_SETTINGCHANGE || msg == WM_THEMECHANGED || msg == APPEARANCE_WM_COMPOSITIONCHANGED)
