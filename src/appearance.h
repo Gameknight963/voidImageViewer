@@ -475,15 +475,16 @@ static LRESULT appearance_toolbar_draw(HWND hwnd,NMTBCUSTOMDRAW *draw,HIMAGELIST
         appearance_buffer_t buffer;
         RECT bounds = draw->nmcd.rc, rect;
         TBBUTTON button;
-        int index, iw = 0, ih = 0, x, y;
+        int index, iw = 0, ih = 0, x, y, enabled;
         WCHAR text[512];
         HICON icon;
         index = (int)SendMessage(hwnd,TB_COMMANDTOINDEX,draw->nmcd.dwItemSpec,0);
         if (index < 0 || !SendMessage(hwnd,TB_GETBUTTON,index,(LPARAM)&button)) return CDRF_DODEFAULT;
         if (button.fsStyle & TBSTYLE_SEP) return CDRF_SKIPDEFAULT;
+        enabled = (button.fsState & TBSTATE_ENABLED) != 0;
         if (!appearance_begin(draw->nmcd.hdc,&bounds,&buffer,appearance_glass)) return CDRF_DODEFAULT;
         SetRect(&rect,0,0,buffer.width,buffer.height);
-        appearance_toolbar_highlight(&buffer,draw->nmcd.uItemState);
+        if (enabled) appearance_toolbar_highlight(&buffer,draw->nmcd.uItemState);
         ImageList_GetIconSize(images,&iw,&ih);
         x = MulDiv(5,os_logical_wide,96);
         y = (buffer.height - ih)/2;
@@ -515,6 +516,24 @@ static LRESULT appearance_toolbar_draw(HWND hwnd,NMTBCUSTOMDRAW *draw,HIMAGELIST
                             DWORD color = alpha * 240 / 255;
                             *pixel = (alpha << 24) | (color << 16) | (color << 8) | color;
                         }
+                        if (!enabled)
+                        {
+                            DWORD gray = (77*((*pixel >> 16)&255) + 150*((*pixel >> 8)&255) + 29*(*pixel&255))/256;
+                            if (appearance_glass)
+                            {
+                                DWORD alpha = (*pixel >> 24)*100/255;
+                                gray = gray*100/255;
+                                *pixel = (alpha << 24) | (gray << 16) | (gray << 8) | gray;
+                            }
+                            else
+                            {
+                                COLORREF background = appearance_bg();
+                                DWORD r = (gray*100 + GetRValue(background)*155)/255;
+                                DWORD g = (gray*100 + GetGValue(background)*155)/255;
+                                DWORD b = (gray*100 + GetBValue(background)*155)/255;
+                                *pixel = 0xff000000 | (r << 16) | (g << 8) | b;
+                            }
+                        }
                     }
                 }
                 SelectObject(mask,old);
@@ -538,7 +557,7 @@ static LRESULT appearance_toolbar_draw(HWND hwnd,NMTBCUSTOMDRAW *draw,HIMAGELIST
                 appearance_text(hwnd,buffer.dc,text,&rect,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX,appearance_glass);
             }
         }
-        if (draw->nmcd.uItemState & CDIS_FOCUS)
+        if (enabled && (draw->nmcd.uItemState & CDIS_FOCUS))
         {
             InflateRect(&rect,-2,-2);
             DrawFocusRect(buffer.dc,&rect);
