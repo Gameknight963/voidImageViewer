@@ -302,4 +302,5 @@ static const utf8_t *_localization_string_array_zh_cn[LOCALIZATION_ID_COUNT] =
     "??", // LOCALIZATION_ID_COLOR_DARK
     "?????????(&G)", // LOCALIZATION_ID_BOTTOM_GLASS
     "???????????????", // LOCALIZATION_ID_GLASS_TEXT_NOTE
+    "启用菜单栏玻璃效果(&M)", // LOCALIZATION_ID_MENU_GLASS
 };

@@ -2589,6 +2589,12 @@ static void _viv_exit(void)
 static LRESULT CALLBACK _viv_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
     if (appearance_menu(hwnd,msg,lParam)) return 0;
+    if ((appearance_dark || appearance_menu_glass) && (msg == WM_NCPAINT || msg == WM_NCACTIVATE))
+    {
+        LRESULT result = DefWindowProc(hwnd,msg,wParam,lParam);
+        appearance_menu_border(hwnd);
+        return result;
+    }
     if (msg == WM_SETTINGCHANGE || msg == WM_THEMECHANGED || msg == APPEARANCE_WM_COMPOSITIONCHANGED)
     {
         appearance_refresh();
@@ -4418,6 +4424,7 @@ debug_printf("PAINT %d %d %d\n",_viv_frame_position,rw,rh);
 					}
 				}
 				
+                appearance_opaque_image_top(hwnd,ps.hdc);
 				_viv_is_animation_paint = 0;
 				
 				DeleteObject(update_hrgn);
@@ -7956,12 +7963,14 @@ static INT_PTR CALLBACK _viv_options_appearance_proc(HWND hwnd,UINT msg,WPARAM w
     {
         os_SetDlgItemText_localization_id(hwnd,IDC_COLOR_MODE_LABEL,LOCALIZATION_ID_COLOR_MODE);
         os_SetDlgItemText_localization_id(hwnd,IDC_BOTTOM_GLASS,LOCALIZATION_ID_BOTTOM_GLASS);
+        os_SetDlgItemText_localization_id(hwnd,IDC_MENU_GLASS,LOCALIZATION_ID_MENU_GLASS);
         os_SetDlgItemText_localization_id(hwnd,IDC_GLASS_TEXT_NOTE,LOCALIZATION_ID_GLASS_TEXT_NOTE);
         os_ComboBox_AddString_localization_id(hwnd,IDC_COLOR_MODE,LOCALIZATION_ID_COLOR_SYSTEM);
         os_ComboBox_AddString_localization_id(hwnd,IDC_COLOR_MODE,LOCALIZATION_ID_COLOR_LIGHT);
         os_ComboBox_AddString_localization_id(hwnd,IDC_COLOR_MODE,LOCALIZATION_ID_COLOR_DARK);
         ComboBox_SetCurSel(GetDlgItem(hwnd,IDC_COLOR_MODE),config_color_mode);
         CheckDlgButton(hwnd,IDC_BOTTOM_GLASS,config_bottom_glass ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(hwnd,IDC_MENU_GLASS,config_menu_glass ? BST_CHECKED : BST_UNCHECKED);
         PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
     }
     if (msg == APPEARANCE_WM_APPLY) appearance_dialog(hwnd);
@@ -8703,6 +8712,7 @@ static INT_PTR CALLBACK _viv_options_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARA
 						
                         config_color_mode = ComboBox_GetCurSel(GetDlgItem(GetDlgItem(hwnd,VIV_ID_OPTIONS_APPEARANCE),IDC_COLOR_MODE));
                         config_bottom_glass = IsDlgButtonChecked(GetDlgItem(hwnd,VIV_ID_OPTIONS_APPEARANCE),IDC_BOTTOM_GLASS) == BST_CHECKED;
+                        config_menu_glass = IsDlgButtonChecked(GetDlgItem(hwnd,VIV_ID_OPTIONS_APPEARANCE),IDC_MENU_GLASS) == BST_CHECKED;
                         appearance_refresh();
                         appearance_window(_viv_hwnd);
                         EnumChildWindows(_viv_hwnd,appearance_child,0);

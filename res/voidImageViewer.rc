@@ -74,7 +74,8 @@ BEGIN
     LTEXT           "&Color mode:",IDC_COLOR_MODE_LABEL,0,3,70,10
     COMBOBOX        IDC_COLOR_MODE,75,0,111,60,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     CONTROL         "Enable &glass on the bottom bars",IDC_BOTTOM_GLASS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,0,30,186,12
-    LTEXT           "Glass text automatically follows the color mode.",IDC_GLASS_TEXT_NOTE,0,54,186,28
+    CONTROL         "Enable glass on the &menu bar",IDC_MENU_GLASS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,0,48,186,12
+    LTEXT           "Glass text automatically follows the color mode.",IDC_GLASS_TEXT_NOTE,0,72,186,28
 END
 
 IDD_VIEW DIALOGEX 0, 0, 194, 183

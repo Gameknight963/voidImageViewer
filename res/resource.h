@@ -130,6 +130,7 @@
 #define IDC_BOTTOM_GLASS 1071
 #define IDC_COLOR_MODE_LABEL 1072
 #define IDC_GLASS_TEXT_NOTE 1073
+#define IDC_MENU_GLASS 1074
 
 // Next default values for new objects
 // 
@@ -138,7 +139,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        131
 #define _APS_NEXT_COMMAND_VALUE         40048
-#define _APS_NEXT_CONTROL_VALUE         1074
+#define _APS_NEXT_CONTROL_VALUE         1075
 #define _APS_NEXT_SYMED_VALUE           109
 #endif
 #endif

@@ -100,6 +100,7 @@ extern BYTE config_fullscreen_background_color_b;
 extern BYTE config_options_last_page;
 extern BYTE config_color_mode; // 0=system, 1=light, 2=dark
 extern BYTE config_bottom_glass;
+extern BYTE config_menu_glass;
 extern int config_short_jump;
 extern int config_medium_jump;
 extern int config_long_jump;

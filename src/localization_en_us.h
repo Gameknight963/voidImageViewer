@@ -301,4 +301,5 @@ static const utf8_t *_localization_string_array_en_us[LOCALIZATION_ID_COUNT] =
     "Dark", // LOCALIZATION_ID_COLOR_DARK
     "Enable &glass on the bottom bars", // LOCALIZATION_ID_BOTTOM_GLASS
     "Glass text automatically follows the color mode.", // LOCALIZATION_ID_GLASS_TEXT_NOTE
+    "Enable glass on the &menu bar", // LOCALIZATION_ID_MENU_GLASS
 };

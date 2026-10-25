@@ -18,9 +18,10 @@ static BOOLEAN (WINAPI *appearance_allow_window)(HWND,BOOLEAN);
 static int (WINAPI *appearance_app_mode)(int);
 static BOOLEAN (WINAPI *appearance_allow_app)(BOOLEAN);
 static void (WINAPI *appearance_flush_menus)(void);
-static BYTE appearance_dark, appearance_glass, appearance_high_contrast;
+static BYTE appearance_dark, appearance_glass, appearance_menu_glass, appearance_high_contrast;
 static DWORD appearance_build;
 static HBRUSH appearance_background;
+static int appearance_top_glass_height;
 
 static COLORREF appearance_bg(void) { return appearance_dark ? RGB(32,32,32) : GetSysColor(COLOR_BTNFACE); }
 static COLORREF appearance_fg(void) { return appearance_dark ? RGB(240,240,240) : GetSysColor(COLOR_BTNTEXT); }
@@ -98,11 +99,27 @@ static void appearance_update_glass(HWND hwnd,int height,int fullscreen)
 {
     BOOL composition = FALSE;
     BYTE previous = appearance_glass;
+    BYTE previous_menu = appearance_menu_glass;
+    HRESULT result;
     appearance_margins_t margins = {0,0,0,0};
     if (appearance_composition) appearance_composition(&composition);
     margins.bottom = config_bottom_glass && !appearance_high_contrast && !fullscreen && composition ? height : 0;
-    appearance_glass = appearance_extend && SUCCEEDED(appearance_extend(hwnd,&margins)) && margins.bottom > 0;
-    if (previous != appearance_glass) RedrawWindow(hwnd,NULL,NULL,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_FRAME);
+    // Put the glass frame's bright lower edge beneath opaque image pixels,
+    // rather than aligning it with the bottom of the transparent menu bar.
+    margins.top = config_menu_glass && !appearance_high_contrast && !fullscreen && composition && GetMenu(hwnd) ? MulDiv(4,os_logical_high,96) : 0;
+    if (margins.top)
+    {
+        MENUBARINFO menu;
+        os_zero_memory(&menu,sizeof(menu));
+        menu.cbSize = sizeof(menu);
+        if (GetMenuBarInfo(hwnd,OBJID_MENU,0,&menu)) margins.top += menu.rcBar.bottom-menu.rcBar.top;
+    }
+    result = appearance_extend ? appearance_extend(hwnd,&margins) : E_NOTIMPL;
+    appearance_glass = SUCCEEDED(result) && margins.bottom > 0;
+    appearance_menu_glass = SUCCEEDED(result) && margins.top > 0;
+    appearance_top_glass_height = appearance_menu_glass ? margins.top : 0;
+    if (previous != appearance_glass || previous_menu != appearance_menu_glass)
+        RedrawWindow(hwnd,NULL,NULL,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_FRAME);
 }
 
 static void appearance_status_style(HWND hwnd)
@@ -171,6 +188,20 @@ static void appearance_end(HDC target,RECT *rect,appearance_buffer_t *buffer,int
     SelectObject(buffer->dc,buffer->old);
     DeleteObject(buffer->bitmap);
     DeleteDC(buffer->dc);
+}
+
+static void appearance_opaque_image_top(HWND hwnd,HDC dc)
+{
+    RECT rect;
+    appearance_buffer_t buffer;
+    if (!appearance_top_glass_height) return;
+    GetClientRect(hwnd,&rect);
+    if (rect.bottom > appearance_top_glass_height) rect.bottom = appearance_top_glass_height;
+    if (appearance_begin(dc,&rect,&buffer,0))
+    {
+        BitBlt(buffer.dc,0,0,buffer.width,buffer.height,dc,0,0,SRCCOPY);
+        appearance_end(dc,&rect,&buffer,0);
+    }
 }
 
 static void appearance_text(HWND hwnd,HDC dc,LPCWSTR text,RECT *rect,UINT flags,int glass)
@@ -536,7 +567,7 @@ typedef struct appearance_uah_draw_s
 
 static int appearance_menu(HWND hwnd,UINT msg,LPARAM lp)
 {
-    if (!appearance_dark) return 0;
+    if (!appearance_dark && !appearance_menu_glass) return 0;
     if (msg == 0x0091) // WM_UAHDRAWMENU
     {
         appearance_uah_menu_t *menu = (void *)lp;
@@ -546,9 +577,11 @@ static int appearance_menu(HWND hwnd,UINT msg,LPARAM lp)
         info.cbSize = sizeof(info);
         if (GetMenuBarInfo(hwnd,OBJID_MENU,0,&info))
         {
+            appearance_buffer_t buffer;
             GetWindowRect(hwnd,&window);
             OffsetRect(&info.rcBar,-window.left,-window.top);
-            FillRect(menu->dc,&info.rcBar,appearance_background);
+            if (appearance_begin(menu->dc,&info.rcBar,&buffer,appearance_menu_glass))
+                appearance_end(menu->dc,&info.rcBar,&buffer,appearance_menu_glass);
         }
         return 1;
     }
@@ -557,8 +590,11 @@ static int appearance_menu(HWND hwnd,UINT msg,LPARAM lp)
         appearance_uah_draw_t *item = (void *)lp;
         MENUITEMINFOW info;
         WCHAR text[256];
-        RECT rect = item->draw.rcItem;
-        HBRUSH brush = appearance_background;
+        RECT bounds = item->draw.rcItem, rect;
+        appearance_buffer_t buffer;
+        NONCLIENTMETRICSW metrics;
+        HFONT font = NULL;
+        UINT state = 0;
         UINT flags = DT_CENTER|DT_VCENTER|DT_SINGLELINE;
         os_zero_memory(&info,sizeof(info));
         info.cbSize = sizeof(info);
@@ -566,14 +602,50 @@ static int appearance_menu(HWND hwnd,UINT msg,LPARAM lp)
         info.dwTypeData = text;
         info.cch = 256;
         if (!GetMenuItemInfoW(item->menu.menu,item->item.position,TRUE,&info)) return 0;
-        if (item->draw.itemState & (ODS_HOTLIGHT|ODS_SELECTED)) brush = CreateSolidBrush(RGB(65,65,65));
-        FillRect(item->draw.hDC,&rect,brush);
-        if (brush != appearance_background) DeleteObject(brush);
+        if (!appearance_begin(item->draw.hDC,&bounds,&buffer,appearance_menu_glass)) return 0;
+        SetRect(&rect,0,0,buffer.width,buffer.height);
+        if (item->draw.itemState & ODS_HOTLIGHT) state |= CDIS_HOT;
+        if (item->draw.itemState & ODS_SELECTED) state |= CDIS_SELECTED;
+        appearance_toolbar_highlight(&buffer,state);
+        os_zero_memory(&metrics,sizeof(metrics));
+        metrics.cbSize = sizeof(metrics);
+        if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0))
+        {
+            font = CreateFontIndirectW(&metrics.lfMenuFont);
+            if (font) SelectObject(buffer.dc,font);
+        }
         if (item->draw.itemState & ODS_NOACCEL) flags |= DT_HIDEPREFIX;
-        SetBkMode(item->draw.hDC,TRANSPARENT);
-        SetTextColor(item->draw.hDC,appearance_fg());
-        DrawTextW(item->draw.hDC,text,-1,&rect,flags);
+        appearance_text(hwnd,buffer.dc,text,&rect,flags,appearance_menu_glass);
+        appearance_end(item->draw.hDC,&bounds,&buffer,appearance_menu_glass);
+        if (font) DeleteObject(font);
         return 1;
     }
     return 0;
+}
+
+static void appearance_menu_border(HWND hwnd)
+{
+    MENUBARINFO menu;
+    RECT window,client,line;
+    POINT origin = {0,0};
+    HDC dc;
+    appearance_buffer_t buffer;
+    if ((!appearance_dark && !appearance_menu_glass) || !GetMenu(hwnd)) return;
+    os_zero_memory(&menu,sizeof(menu));
+    menu.cbSize = sizeof(menu);
+    if (!GetMenuBarInfo(hwnd,OBJID_MENU,0,&menu)) return;
+    GetWindowRect(hwnd,&window);
+    GetClientRect(hwnd,&client);
+    ClientToScreen(hwnd,&origin);
+    // Themes may paint the separator on the last menu row as well as in the
+    // non-client gap immediately above the image. Cover both after NC paint.
+    SetRect(&line,origin.x-window.left,menu.rcBar.bottom-window.top-1,
+        origin.x-window.left+client.right,origin.y-window.top);
+    dc = GetWindowDC(hwnd);
+    if (dc)
+    {
+        if (appearance_begin(dc,&line,&buffer,appearance_menu_glass))
+            appearance_end(dc,&line,&buffer,appearance_menu_glass);
+        ReleaseDC(hwnd,dc);
+    }
 }
