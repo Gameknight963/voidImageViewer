@@ -288,6 +288,7 @@
 #define _VIV_STRETCH_BLT_STITCH_SIZE		512
 
 #include "viv.h"
+#include "appearance.h"
 
 enum
 {
@@ -492,6 +493,7 @@ static void _viv_doing_cancel(void);
 static const char *_viv_get_copydata_string(const char *p,const char *e,wchar_t *buf,int bufsize);
 static void _viv_blank(void);
 static void _viv_options(void);
+static INT_PTR CALLBACK _viv_options_appearance_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
 static INT_PTR CALLBACK _viv_options_proc(HWND hwndDlg,UINT uMsg,WPARAM wParam,LPARAM lParam);
 static INT_PTR CALLBACK _viv_options_general_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
 static INT_PTR CALLBACK _viv_options_view_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
@@ -733,12 +735,12 @@ static volatile int _viv_load_image_terminate = 0;
 static _viv_reply_t *_viv_reply_start = 0;
 static _viv_reply_t *_viv_reply_last = 0;
 static wchar_t *_viv_status_temp_text = 0;
-static localization_id_t _viv_options_page_localization_id_array[] = {LOCALIZATION_ID_OPTIONS_GENERAL_DIALOG,LOCALIZATION_ID_OPTIONS_VIEW_DIALOG,LOCALIZATION_ID_OPTIONS_CONTROLS_DIALOG};
-static int _viv_options_tab_ids[] = {IDC_TAB1,IDC_TAB2,IDC_TAB3};
-static int _viv_options_dialog_ids[] = {IDD_GENERAL,IDD_VIEW,IDD_CONTROLS};
+static localization_id_t _viv_options_page_localization_id_array[] = {LOCALIZATION_ID_OPTIONS_GENERAL_DIALOG,LOCALIZATION_ID_OPTIONS_VIEW_DIALOG,LOCALIZATION_ID_OPTIONS_CONTROLS_DIALOG,LOCALIZATION_ID_APPEARANCE};
+static int _viv_options_tab_ids[] = {IDC_TAB1,IDC_TAB2,IDC_TAB3,IDC_TAB4};
+static int _viv_options_dialog_ids[] = {IDD_GENERAL,IDD_VIEW,IDD_CONTROLS,IDD_APPEARANCE};
 #define _VIV_OPTIONS_PAGE_COUNT	(sizeof(_viv_options_dialog_ids) / sizeof(int))
-static int _viv_options_page_ids[] = {VIV_ID_OPTIONS_GENERAL,VIV_ID_OPTIONS_VIEW,VIV_ID_OPTIONS_CONTROLS};
-static DLGPROC _viv_options_page_procs[] = {_viv_options_general_proc,_viv_options_view_proc,_viv_options_controls_proc};
+static int _viv_options_page_ids[] = {VIV_ID_OPTIONS_GENERAL,VIV_ID_OPTIONS_VIEW,VIV_ID_OPTIONS_CONTROLS,VIV_ID_OPTIONS_APPEARANCE};
+static DLGPROC _viv_options_page_procs[] = {_viv_options_general_proc,_viv_options_view_proc,_viv_options_controls_proc,_viv_options_appearance_proc};
 static HFONT _viv_about_hfont = 0;
 static wchar_t *_viv_last_open_file = 0;
 static wchar_t *_viv_last_open_folder = 0;
@@ -1652,6 +1654,9 @@ static void _viv_on_size(void)
 		}
 
 		_viv_toolbar_update_buttons();
+        appearance_window(_viv_hwnd);
+        appearance_update_glass(_viv_hwnd,_viv_get_status_high() + _viv_get_controls_high(),_viv_is_fullscreen);
+        appearance_status_style(_viv_status_hwnd);
 	}
 }
 
@@ -2583,6 +2588,15 @@ static void _viv_exit(void)
 
 static LRESULT CALLBACK _viv_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if (appearance_menu(hwnd,msg,lParam)) return 0;
+    if (msg == WM_SETTINGCHANGE || msg == WM_THEMECHANGED || msg == APPEARANCE_WM_COMPOSITIONCHANGED)
+    {
+        appearance_refresh();
+        EnumThreadWindows(GetCurrentThreadId(),appearance_thread_window,0);
+        _viv_on_size();
+        RedrawWindow(hwnd,NULL,NULL,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_FRAME);
+    }
+
 	switch (msg) 
 	{	
 		case WM_NCHITTEST:
@@ -5260,6 +5274,8 @@ static int _viv_init(int nCmdShow)
 
 	// load settings
 	config_load_settings();
+    appearance_init();
+    appearance_refresh();
 	
 	// config_maximized will be overwritten when we show are normal window
 	// so save it now and apply it later.
@@ -7231,6 +7247,9 @@ static void _viv_delete(int permanently)
 
 static INT_PTR CALLBACK _viv_rename_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if (msg == WM_INITDIALOG) PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
+    if (msg == APPEARANCE_WM_APPLY) { appearance_dialog(hwnd); return 0; }
+    { INT_PTR color = appearance_dialog_color(msg,wParam); if (color) return color; }
 	switch(msg)
 	{
 		case WM_INITDIALOG:
@@ -7929,8 +7948,31 @@ static void _viv_blank(void)
 	_viv_process_pending_clear();
 }
 
+static INT_PTR CALLBACK _viv_options_appearance_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
+{
+    INT_PTR color = appearance_dialog_color(msg,wParam);
+    if (color) return color;
+    if (msg == WM_INITDIALOG)
+    {
+        os_SetDlgItemText_localization_id(hwnd,IDC_COLOR_MODE_LABEL,LOCALIZATION_ID_COLOR_MODE);
+        os_SetDlgItemText_localization_id(hwnd,IDC_BOTTOM_GLASS,LOCALIZATION_ID_BOTTOM_GLASS);
+        os_SetDlgItemText_localization_id(hwnd,IDC_GLASS_TEXT_NOTE,LOCALIZATION_ID_GLASS_TEXT_NOTE);
+        os_ComboBox_AddString_localization_id(hwnd,IDC_COLOR_MODE,LOCALIZATION_ID_COLOR_SYSTEM);
+        os_ComboBox_AddString_localization_id(hwnd,IDC_COLOR_MODE,LOCALIZATION_ID_COLOR_LIGHT);
+        os_ComboBox_AddString_localization_id(hwnd,IDC_COLOR_MODE,LOCALIZATION_ID_COLOR_DARK);
+        ComboBox_SetCurSel(GetDlgItem(hwnd,IDC_COLOR_MODE),config_color_mode);
+        CheckDlgButton(hwnd,IDC_BOTTOM_GLASS,config_bottom_glass ? BST_CHECKED : BST_UNCHECKED);
+        PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
+    }
+    if (msg == APPEARANCE_WM_APPLY) appearance_dialog(hwnd);
+    return FALSE;
+}
+
 static INT_PTR CALLBACK _viv_options_general_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if (msg == WM_INITDIALOG) PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
+    if (msg == APPEARANCE_WM_APPLY) { appearance_dialog(hwnd); return 0; }
+    { INT_PTR color = appearance_dialog_color(msg,wParam); if (color) return color; }
 	switch(msg)
 	{
 		case WM_INITDIALOG:
@@ -8111,6 +8153,9 @@ static void _viv_options_remove_key(HWND hwnd)
 
 static INT_PTR CALLBACK _viv_edit_key_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if (msg == WM_INITDIALOG) PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
+    if (msg == APPEARANCE_WM_APPLY) { appearance_dialog(hwnd); return 0; }
+    { INT_PTR color = appearance_dialog_color(msg,wParam); if (color) return color; }
 	switch(msg)
 	{
 		case WM_INITDIALOG:
@@ -8222,6 +8267,9 @@ static void _viv_options_edit_key(HWND hwnd,int key_index)
 
 static INT_PTR CALLBACK _viv_options_controls_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if (msg == WM_INITDIALOG) PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
+    if (msg == APPEARANCE_WM_APPLY) { appearance_dialog(hwnd); return 0; }
+    { INT_PTR color = appearance_dialog_color(msg,wParam); if (color) return color; }
 	switch(msg)
 	{
 		case WM_INITDIALOG:
@@ -8339,6 +8387,9 @@ static INT_PTR CALLBACK _viv_options_controls_proc(HWND hwnd,UINT msg,WPARAM wPa
 
 static INT_PTR CALLBACK _viv_options_view_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if (msg == WM_INITDIALOG) PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
+    if (msg == APPEARANCE_WM_APPLY) { appearance_dialog(hwnd); return 0; }
+    { INT_PTR color = appearance_dialog_color(msg,wParam); if (color) return color; }
 	switch(msg)
 	{
 		case WM_INITDIALOG:
@@ -8536,6 +8587,9 @@ static void _viv_options_update_sheild(HWND hwnd)
 
 static INT_PTR CALLBACK _viv_options_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if (msg == WM_INITDIALOG) PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
+    if (msg == APPEARANCE_WM_APPLY) { appearance_dialog(hwnd); return 0; }
+    { INT_PTR color = appearance_dialog_color(msg,wParam); if (color) return color; }
 	switch(msg)
 	{
 		case WM_NOTIFY:
@@ -8624,6 +8678,7 @@ static INT_PTR CALLBACK _viv_options_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARA
 
 			_viv_options_treeview_changed(hwnd);
 			_viv_options_update_sheild(hwnd);
+            appearance_dialog(hwnd);
 
 			return TRUE;
 		
@@ -8646,6 +8701,13 @@ static INT_PTR CALLBACK _viv_options_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARA
 						
 						params[0] = 0;
 						
+                        config_color_mode = ComboBox_GetCurSel(GetDlgItem(GetDlgItem(hwnd,VIV_ID_OPTIONS_APPEARANCE),IDC_COLOR_MODE));
+                        config_bottom_glass = IsDlgButtonChecked(GetDlgItem(hwnd,VIV_ID_OPTIONS_APPEARANCE),IDC_BOTTOM_GLASS) == BST_CHECKED;
+                        appearance_refresh();
+                        appearance_window(_viv_hwnd);
+                        EnumChildWindows(_viv_hwnd,appearance_child,0);
+                        _viv_on_size();
+                        RedrawWindow(_viv_hwnd,NULL,NULL,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_FRAME);
 						general_page = GetDlgItem(hwnd,VIV_ID_OPTIONS_GENERAL);
 						view_page = GetDlgItem(hwnd,VIV_ID_OPTIONS_VIEW);
 						controls_page = GetDlgItem(hwnd,VIV_ID_OPTIONS_CONTROLS);
@@ -9662,6 +9724,9 @@ static int _viv_is_window_maximized(HWND hwnd)
 
 static INT_PTR CALLBACK _viv_custom_rate_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if (msg == WM_INITDIALOG) PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
+    if (msg == APPEARANCE_WM_APPLY) { appearance_dialog(hwnd); return 0; }
+    { INT_PTR color = appearance_dialog_color(msg,wParam); if (color) return color; }
 	switch(msg)
 	{
 		case WM_INITDIALOG:
@@ -9727,6 +9792,20 @@ static INT_PTR CALLBACK _viv_custom_rate_proc(HWND hwnd,UINT msg,WPARAM wParam,L
 
 static INT_PTR CALLBACK _viv_about_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if (appearance_dark && msg == WM_PAINT)
+    {
+        PAINTSTRUCT ps;
+        RECT rect;
+        BeginPaint(hwnd,&ps);
+        GetClientRect(hwnd,&rect);
+        FillRect(ps.hdc,&rect,appearance_background);
+        EndPaint(hwnd,&ps);
+        return TRUE;
+    }
+
+    if (msg == WM_INITDIALOG) PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
+    if (msg == APPEARANCE_WM_APPLY) { appearance_dialog(hwnd); return 0; }
+    { INT_PTR color = appearance_dialog_color(msg,wParam); if (color) return color; }
 	switch(msg)
 	{
 		case WM_CTLCOLOREDIT:	
@@ -11450,6 +11529,19 @@ static int _viv_get_controls_high(void)
 
 static LRESULT CALLBACK _viv_rebar_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if ((appearance_dark || appearance_glass) && (msg == WM_PAINT || msg == WM_PRINTCLIENT))
+    {
+        PAINTSTRUCT ps;
+        RECT rect;
+        appearance_buffer_t buffer;
+        HDC dc = msg == WM_PAINT ? BeginPaint(hwnd,&ps) : (HDC)wParam;
+        GetClientRect(hwnd,&rect);
+        if (appearance_begin(dc,&rect,&buffer,appearance_glass))
+            appearance_end(dc,&rect,&buffer,appearance_glass);
+        if (msg == WM_PAINT) EndPaint(hwnd,&ps);
+        return 0;
+    }
+
 	switch (msg) 
 	{	
 		case WM_LBUTTONDOWN:
@@ -11475,6 +11567,9 @@ static LRESULT CALLBACK _viv_rebar_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM 
 						{
 							case NM_CUSTOMDRAW:
 							{
+                                if (appearance_dark || appearance_glass)
+                                    return appearance_toolbar_draw(_viv_toolbar_hwnd,(NMTBCUSTOMDRAW *)lParam,_viv_toolbar_image_list);
+
 								switch(((NMTBCUSTOMDRAW *)lParam)->nmcd.dwDrawStage)
 								{
 									case CDDS_PREPAINT:	
@@ -11551,6 +11646,19 @@ static LRESULT CALLBACK _viv_rebar_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM 
 
 static LRESULT CALLBACK _viv_status_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if (appearance_dark || appearance_glass)
+    {
+        if (msg == WM_ERASEBKGND) return 1;
+        if (msg == WM_PAINT || msg == WM_PRINTCLIENT)
+        {
+            PAINTSTRUCT ps;
+            HDC dc = msg == WM_PAINT ? BeginPaint(hwnd,&ps) : (HDC)wParam;
+            appearance_status_paint(hwnd,dc);
+            if (msg == WM_PAINT) EndPaint(hwnd,&ps);
+            return 0;
+        }
+    }
+
 	switch (msg) 
 	{	
 		case WM_LBUTTONDOWN:
@@ -13002,6 +13110,9 @@ static void _viv_jumpto_open_sel(HWND hwnd)
 			
 static LRESULT CALLBACK _viv_jumpto_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if (msg == WM_INITDIALOG) PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
+    if (msg == APPEARANCE_WM_APPLY) { appearance_dialog(hwnd); return 0; }
+    { INT_PTR color = appearance_dialog_color(msg,wParam); if (color) return color; }
 	switch(msg)
 	{
 		case WM_INITDIALOG:
@@ -13328,6 +13439,9 @@ static int _viv_nav_compare(const _viv_nav_item_t *a,const _viv_nav_item_t *b)
 
 static INT_PTR CALLBACK _viv_search_everything_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if (msg == WM_INITDIALOG) PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
+    if (msg == APPEARANCE_WM_APPLY) { appearance_dialog(hwnd); return 0; }
+    { INT_PTR color = appearance_dialog_color(msg,wParam); if (color) return color; }
 	switch(msg)
 	{
 		case WM_INITDIALOG:

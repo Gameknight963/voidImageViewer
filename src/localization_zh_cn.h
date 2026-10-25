@@ -295,4 +295,11 @@ static const utf8_t *_localization_string_array_zh_cn[LOCALIZATION_ID_COUNT] =
 	"TIFF Image",
 	"TIFF Image",
 	"WebP Image",
+    "??", // LOCALIZATION_ID_APPEARANCE
+    "????(&C):", // LOCALIZATION_ID_COLOR_MODE
+    "????", // LOCALIZATION_ID_COLOR_SYSTEM
+    "??", // LOCALIZATION_ID_COLOR_LIGHT
+    "??", // LOCALIZATION_ID_COLOR_DARK
+    "?????????(&G)", // LOCALIZATION_ID_BOTTOM_GLASS
+    "???????????????", // LOCALIZATION_ID_GLASS_TEXT_NOTE
 };

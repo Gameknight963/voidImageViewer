@@ -68,6 +68,8 @@ BYTE config_windowed_background_color_b = 255;
 BYTE config_fullscreen_background_color_r = 0;
 BYTE config_fullscreen_background_color_g = 0;
 BYTE config_fullscreen_background_color_b = 0;
+BYTE config_color_mode = 0;
+BYTE config_bottom_glass = 0;
 BYTE config_options_last_page = 0;
 int config_short_jump = 500;
 int config_medium_jump = 1000;
@@ -143,6 +145,11 @@ static void _config_load_settings_by_location(const wchar_t *path,int is_root)
 		config_fullscreen_background_color_g = ini_get_int(ini,(const utf8_t *)"fullscreen_background_color_g",config_fullscreen_background_color_g);
 		config_fullscreen_background_color_b = ini_get_int(ini,(const utf8_t *)"fullscreen_background_color_b",config_fullscreen_background_color_b);
 		config_options_last_page = ini_get_int(ini,(const utf8_t *)"options_last_page",config_options_last_page);
+        {
+            int mode = ini_get_int(ini,(const utf8_t *)"color_mode",config_color_mode);
+            config_color_mode = mode >= 0 && mode <= 2 ? mode : 0;
+            config_bottom_glass = ini_get_int(ini,(const utf8_t *)"bottom_glass",config_bottom_glass) != 0;
+        }
 		config_short_jump = ini_get_int(ini,(const utf8_t *)"short_jump",config_short_jump);
 		config_medium_jump = ini_get_int(ini,(const utf8_t *)"medium_jump",config_medium_jump);
 		config_long_jump = ini_get_int(ini,(const utf8_t *)"long_jump",config_long_jump);
@@ -327,6 +334,8 @@ static void _config_save_settings_by_location(const wchar_t *path,int is_root)
 			_config_write_int(h,"fullscreen_background_color_g",config_fullscreen_background_color_g);
 			_config_write_int(h,"fullscreen_background_color_b",config_fullscreen_background_color_b);
 			_config_write_int(h,"options_last_page",config_options_last_page);
+            _config_write_int(h,"color_mode",config_color_mode);
+            _config_write_int(h,"bottom_glass",config_bottom_glass);
 			_config_write_int(h,"short_jump",config_short_jump);
 			_config_write_int(h,"medium_jump",config_medium_jump);
 			_config_write_int(h,"long_jump",config_long_jump);
