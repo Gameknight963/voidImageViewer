@@ -163,7 +163,7 @@ static void _config_load_settings_by_location(const wchar_t *path,int is_root)
             config_icon_style = mode >= 0 && mode <= 4 ? mode : 2;
             config_custom_glow = ini_get_int(ini,(const utf8_t *)"custom_glow",config_custom_glow) != 0;
             mode = ini_get_int(ini,(const utf8_t *)"glow_size",config_glow_size);
-            config_glow_size = mode >= 1 && mode <= 12 ? mode : 6;
+            config_glow_size = mode >= 0 && mode <= 12 ? mode : 6;
             mode = ini_get_int(ini,(const utf8_t *)"glow_strength",config_glow_strength);
             config_glow_strength = mode >= 0 && mode <= 100 ? mode : 100;
             config_glow_color = ini_get_int(ini,(const utf8_t *)"glow_color",config_glow_color) & 0x00ffffff;

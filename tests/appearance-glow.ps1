@@ -39,7 +39,7 @@ New-Item -ItemType Directory -Path $testRoot | Out-Null
 $testExe=Join-Path $testRoot 'voidImageViewer.exe'
 $testIni=Join-Path $testRoot 'voidImageViewer.ini'
 Copy-Item -LiteralPath $BuildExe -Destination $testExe
-Set-Content -LiteralPath $testIni -Encoding Ascii -Value "[voidImageViewer]`r`nappdata=0`r`nmultiple_instances=1`r`ncolor_mode=2`r`nbottom_glass=1`r`nmenu_glass=1`r`noptions_last_page=3`r`nwide=800`r`nhigh=600`r`ntext_style=0`r`nicon_style=1`r`ncustom_glow=1`r`nglow_size=6`r`nglow_strength=75`r`nglow_color=16777215"
+Set-Content -LiteralPath $testIni -Encoding Ascii -Value "[voidImageViewer]`r`nappdata=0`r`nmultiple_instances=1`r`ncolor_mode=2`r`nbottom_glass=1`r`nmenu_glass=1`r`noptions_last_page=3`r`nwide=800`r`nhigh=600`r`ntext_style=0`r`nicon_style=1`r`ncustom_glow=1`r`nglow_size=0`r`nglow_strength=75`r`nglow_color=16777215"
 
 function Assert($condition,[string]$message) { if (!$condition) { throw $message } }
 function Message($window,$message,$wp=0,$lp=0) { return [GlowUI]::SendMessage($window,$message,[IntPtr]$wp,[IntPtr]$lp) }
@@ -86,6 +86,23 @@ function Number($page,[int]$id,[int]$value) {
 }
 function Select-Style($page,[int]$text,[int]$icon) { Choice $page 1076 $text; Choice $page 1078 $icon }
 
+function Preview-Pixels($dialog) {
+    Start-Sleep -Milliseconds 150
+    $rect=New-Object GlowUI+Rect; $preview=New-Object GlowUI+Rect
+    [void][GlowUI]::GetWindowRect($dialog,[ref]$rect)
+    [void][GlowUI]::GetWindowRect([GlowUI]::GetDlgItem([GlowUI]::GetDlgItem($dialog,1136),1089),[ref]$preview)
+    $bitmap=New-Object System.Drawing.Bitmap(($rect.Right-$rect.Left),($rect.Bottom-$rect.Top))
+    $graphics=[System.Drawing.Graphics]::FromImage($bitmap); $dc=$graphics.GetHdc()
+    try { [void][GlowUI]::PrintWindow($dialog,$dc,2) } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+    $area=New-Object System.Drawing.Rectangle(($preview.Left-$rect.Left),($preview.Top-$rect.Top),($preview.Right-$preview.Left),($preview.Bottom-$preview.Top))
+    $crop=$bitmap.Clone($area,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $data=$crop.LockBits((New-Object System.Drawing.Rectangle(0,0,$crop.Width,$crop.Height)),[System.Drawing.Imaging.ImageLockMode]::ReadOnly,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $bytes=New-Object byte[] ($data.Stride*$data.Height)
+    [Runtime.InteropServices.Marshal]::Copy($data.Scan0,$bytes,0,$bytes.Length)
+    $crop.UnlockBits($data); $crop.Dispose(); $bitmap.Dispose()
+    return [Convert]::ToBase64String($bytes)
+}
+
 $app=Start-Process -FilePath $testExe -WorkingDirectory $testRoot -WindowStyle Hidden -PassThru
 try {
     $main=[IntPtr]::Zero
@@ -106,6 +123,18 @@ try {
     Assert ((Message ([GlowUI]::GetDlgItem($page,1078)) 0x147).ToInt32() -eq 1) 'Icon style did not load.'
     Assert ((Message ([GlowUI]::GetDlgItem($page,1079)) 0xf0).ToInt32() -eq 1) 'Custom glow did not load.'
     Assert ([GlowUI]::IsWindowEnabled([GlowUI]::GetDlgItem($page,1085))) 'Custom strength control is disabled.'
+    Assert ((Message ([GlowUI]::GetDlgItem($page,1090)) 0x400).ToInt32() -eq 0) 'Zero glow size did not load.'
+    $zero=Preview-Pixels $dialog
+    Select-Style $page 3 4
+    $plain=Preview-Pixels $dialog
+    Assert ($zero -eq $plain) 'Zero size still draws a custom glow.'
+    Select-Style $page 0 1
+    [void](Message ([GlowUI]::GetDlgItem($page,1079)) 0xf5)
+    Assert ((Preview-Pixels $dialog) -eq $plain) 'Zero size still draws a native glow.'
+    [void](Message ([GlowUI]::GetDlgItem($page,1079)) 0xf5)
+    Number $page 1082 1
+    Assert ((Preview-Pixels $dialog) -ne $plain) 'One pixel custom glow is invisible.'
+    Number $page 1082 6
     Capture $dialog 'custom-glow'
     # Every explicit style must remain selectable without changing color mode.
     for ($style=0;$style -lt 4;$style++) {
@@ -154,12 +183,15 @@ try {
     Start-Sleep -Milliseconds 100
     Assert ((Get-Content -LiteralPath $testIni -Raw) -eq $saved) 'Cancel changed persisted settings.'
     # Glow radius and icon styles must preserve the shared toolbar geometry.
-    foreach ($pair in @(@(0,1,1),@(0,1,6),@(0,1,12),@(1,2,12),@(2,3,12),@(3,4,12),@(0,0,12))) {
+    foreach ($pair in @(@(0,1,0),@(0,1,1),@(0,1,6),@(0,1,12),@(1,2,12),@(2,3,12),@(3,4,12),@(0,0,12))) {
         $dialog=Open-Options; $page=[GlowUI]::GetDlgItem($dialog,1136)
         Select-Style $page $pair[0] $pair[1]
         Number $page 1082 $pair[2]
         Finish-Options $dialog 1
         Start-Sleep -Milliseconds 150
+        if ($pair[2] -eq 0) {
+            Assert ((Get-Content -LiteralPath $testIni -Raw) -match '(?m)^glow_size=0\r?$') 'Zero size did not save.'
+        }
         $tb=[GlowUI]::GetDlgItem([GlowUI]::GetDlgItem($main,1114),1114)
         $tbRect=New-Object GlowUI+Rect
         [void][GlowUI]::GetWindowRect($tb,[ref]$tbRect)
@@ -171,7 +203,7 @@ try {
     [void][GlowUI]::PostMessage($main,0x10,[IntPtr]::Zero,[IntPtr]::Zero)
     Assert ($app.WaitForExit(5000)) 'Viewer did not close.'
     Assert ($app.ExitCode -eq 0) 'Viewer exited with an error.'
-    Write-Output 'PASS: explicit styles, renderer toggle, control enablement, sliders, color picker, persistence, Cancel, preview, and fixed layouts across glow sizes.'
+    Write-Output 'PASS: explicit styles, renderer toggle, control enablement, sliders, color picker, persistence, Cancel, preview, zero/one pixel native/custom previews, and fixed layouts across glow sizes.'
     Write-Output ('Artifacts: '+$testRoot)
 }
 finally { if (!$app.HasExited) { $app.Kill(); $app.WaitForExit() } }

@@ -43,11 +43,17 @@ int main()
     failures+=check(half_weight>weight*0.4 && half_weight<weight*0.6,"strength controls halo opacity");
     failures+=check(glow_render(source,second,64,64,12,100,RGB(255,255,255))!=0,"larger radius render");
     failures+=check((second[24*64+31]>>24)>(first[24*64+31]>>24),"increasing the radius spreads the halo outward");
+    failures+=check(glow_render(source,second,64,64,1,100,RGB(255,255,255))!=0,"one pixel glow render");
+    failures+=check((second[28*64+31]>>24)>0,"one pixel glow remains visible outside the silhouette");
+    failures+=check(glow_render(source,second,64,64,0,100,RGB(255,255,255))!=0,"zero size render");
+    combined=0;
+    for (int i=0;i<64*64;i++) combined|=second[i];
+    failures+=check(combined==0,"zero size is fully transparent");
     ZeroMemory(source,sizeof(source));
     failures+=check(glow_render(source,second,64,64,6,100,RGB(255,255,255))!=0,"empty mask render");
     combined=0;
     for (int i=0;i<64*64;i++) combined|=second[i];
     failures+=check(combined==0,"empty masks produce no halo");
-    if (!failures) puts("PASS: Direct2D halo coverage, alignment, premultiplied alpha, color, strength, empty input, and cache.");
+    if (!failures) puts("PASS: Direct2D halo coverage, alignment, premultiplied alpha, color, strength, empty input, zero/one pixel sizes, and cache.");
     return failures ? 1 : 0;
 }

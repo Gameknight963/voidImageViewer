@@ -56,8 +56,11 @@ static unsigned glow_next_cache;
 
 extern "C" int __cdecl glow_render(const DWORD *source,DWORD *output,unsigned width,unsigned height,unsigned radius,unsigned strength,COLORREF color)
 {
-    if (!source || !output || !width || !height || width > 16384 || height > 4096 || !glow_available()) return 0;
+    if (!source || !output || !width || !height || width > 16384 || height > 4096) return 0;
     const SIZE_T count = static_cast<SIZE_T>(width)*height;
+    // Off means no effects, caching, or graphics-device initialization.
+    if (!radius || !strength) { ZeroMemory(output,count*4); return 1; }
+    if (!glow_available()) return 0;
     for (unsigned i=0;i<24;i++)
     {
         glow_cache_entry &entry = glow_cache[i];
@@ -83,10 +86,11 @@ extern "C" int __cdecl glow_render(const DWORD *source,DWORD *output,unsigned wi
     if (SUCCEEDED(result)) result = glow_context->CreateEffect(CLSID_D2D1Shadow,&shadow);
     if (SUCCEEDED(result))
     {
+        // Keep the smallest positive halo visible beyond the sharp silhouette.
         spread->SetInput(0,input);
         result = spread->SetValue(D2D1_MORPHOLOGY_PROP_MODE,D2D1_MORPHOLOGY_MODE_DILATE);
-        if (SUCCEEDED(result)) result = spread->SetValue(D2D1_MORPHOLOGY_PROP_WIDTH,static_cast<UINT32>(radius>1 ? 3 : 1));
-        if (SUCCEEDED(result)) result = spread->SetValue(D2D1_MORPHOLOGY_PROP_HEIGHT,static_cast<UINT32>(radius>1 ? 3 : 1));
+        if (SUCCEEDED(result)) result = spread->SetValue(D2D1_MORPHOLOGY_PROP_WIDTH,static_cast<UINT32>(3));
+        if (SUCCEEDED(result)) result = spread->SetValue(D2D1_MORPHOLOGY_PROP_HEIGHT,static_cast<UINT32>(3));
         shadow->SetInputEffect(0,spread);
         D2D1_VECTOR_4F tint = {GetRValue(color)/255.f,GetGValue(color)/255.f,GetBValue(color)/255.f,strength/100.f};
         if (SUCCEEDED(result)) result = shadow->SetValue(D2D1_SHADOW_PROP_COLOR,tint);

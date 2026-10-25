@@ -257,7 +257,7 @@ static void appearance_blend_layer(HDC dc,const appearance_buffer_t *layer,int d
 
 static void appearance_render_layer(HDC dc,appearance_buffer_t *layer,int x,int y,int effect,const appearance_style_t *style)
 {
-    if (effect)
+    if (effect && (effect!=1 || (style->size>0 && style->strength>0)))
     {
         appearance_buffer_t halo=*layer;
         int count=layer->width*layer->height;
@@ -296,7 +296,7 @@ static void appearance_styled_text(HWND hwnd,HDC dc,LPCWSTR text,RECT *rect,UINT
     appearance_buffer_t layer;
     RECT bounds,local;
     int i;
-    if (style->text==0 && !style->custom && appearance_open_theme && appearance_theme_text)
+    if (style->text==0 && style->size>0 && !style->custom && appearance_open_theme && appearance_theme_text)
     {
         HTHEME theme=appearance_open_theme(NULL,L"CompositedWindow::Window");
         if (!theme) theme=appearance_open_theme(hwnd,L"WINDOW");
@@ -832,7 +832,7 @@ static appearance_style_t appearance_page_read(HWND hwnd)
     if (value>=0 && value<=4) style.icon=value;
     style.custom=IsDlgButtonChecked(hwnd,IDC_CUSTOM_GLOW)==BST_CHECKED;
     value=GetDlgItemInt(hwnd,IDC_GLOW_SIZE,&valid,FALSE);
-    if (valid) style.size=value<1 ? 1 : value>12 ? 12 : value;
+    if (valid) style.size=value<0 ? 0 : value>12 ? 12 : value;
     value=GetDlgItemInt(hwnd,IDC_GLOW_STRENGTH,&valid,FALSE);
     if (valid) style.strength=value<0 ? 0 : value>100 ? 100 : value;
     style.color=(COLORREF)GetWindowLongPtr(GetDlgItem(hwnd,IDC_GLOW_COLOR),GWLP_USERDATA);
@@ -841,7 +841,11 @@ static appearance_style_t appearance_page_read(HWND hwnd)
 
 static void appearance_page_update(HWND hwnd)
 {
-    appearance_style_t style=appearance_page_read(hwnd);
+    appearance_style_t style;
+    // Edit/spin controls send notifications even before WM_INITDIALOG.
+    // Wait until all controls have their final values before updating them.
+    if (!GetWindowLongPtr(hwnd,DWLP_USER)) return;
+    style=appearance_page_read(hwnd);
     int glow=style.text==0 || style.icon==1;
     int custom=style.icon==1 || (style.text==0 && style.custom);
     int size_ids[]={IDC_GLOW_SIZE,IDC_GLOW_SIZE_SPIN,IDC_GLOW_SIZE_SLIDER};
@@ -853,7 +857,7 @@ static void appearance_page_update(HWND hwnd)
     SendDlgItemMessage(hwnd,IDC_GLOW_STRENGTH_SLIDER,TBM_SETPOS,TRUE,style.strength);
     EnableWindow(GetDlgItem(hwnd,IDC_CUSTOM_GLOW),glow);
     os_SetDlgItemText_localization_id(hwnd,IDC_GLOW_DESCRIPTION,
-        custom && !glow_available() ? LOCALIZATION_ID_GLOW_UNAVAILABLE :
+        custom && style.size>0 && style.strength>0 && !glow_available() ? LOCALIZATION_ID_GLOW_UNAVAILABLE :
         style.custom ? LOCALIZATION_ID_GLOW_DESC_CUSTOM : LOCALIZATION_ID_GLOW_DESC_NATIVE);
     InvalidateRect(GetDlgItem(hwnd,IDC_GLOW_PREVIEW),NULL,FALSE);
     InvalidateRect(GetDlgItem(hwnd,IDC_GLOW_COLOR),NULL,FALSE);
@@ -876,20 +880,21 @@ static void appearance_page_init(HWND hwnd)
     ComboBox_SetCurSel(GetDlgItem(hwnd,IDC_TEXT_STYLE),style.text);
     ComboBox_SetCurSel(GetDlgItem(hwnd,IDC_ICON_STYLE),style.icon);
     CheckDlgButton(hwnd,IDC_CUSTOM_GLOW,style.custom ? BST_CHECKED : BST_UNCHECKED);
-    SendDlgItemMessage(hwnd,IDC_GLOW_SIZE_SPIN,UDM_SETRANGE32,1,12);
+    SendDlgItemMessage(hwnd,IDC_GLOW_SIZE_SPIN,UDM_SETRANGE32,0,12);
     SendDlgItemMessage(hwnd,IDC_GLOW_STRENGTH_SPIN,UDM_SETRANGE32,0,100);
-    SendDlgItemMessage(hwnd,IDC_GLOW_SIZE_SLIDER,TBM_SETRANGE,TRUE,MAKELPARAM(1,12));
+    SendDlgItemMessage(hwnd,IDC_GLOW_SIZE_SLIDER,TBM_SETRANGE,TRUE,MAKELPARAM(0,12));
     SendDlgItemMessage(hwnd,IDC_GLOW_STRENGTH_SLIDER,TBM_SETRANGE,TRUE,MAKELPARAM(0,100));
     SetDlgItemInt(hwnd,IDC_GLOW_SIZE,style.size,FALSE);
     SetDlgItemInt(hwnd,IDC_GLOW_STRENGTH,style.strength,FALSE);
     SetWindowLongPtr(GetDlgItem(hwnd,IDC_GLOW_COLOR),GWLP_USERDATA,style.color);
+    SetWindowLongPtr(hwnd,DWLP_USER,1);
     appearance_page_update(hwnd);
 }
 
 static int appearance_page_save(HWND hwnd)
 {
     appearance_style_t style=appearance_page_read(hwnd);
-    if ((style.icon==1 || (style.text==0 && style.custom)) && !glow_available())
+    if (style.size>0 && style.strength>0 && (style.icon==1 || (style.text==0 && style.custom)) && !glow_available())
     {
         WCHAR message[STRING_SIZE];
         string_copy_utf8_string(message,localization_get_string(LOCALIZATION_ID_GLOW_UNAVAILABLE));
