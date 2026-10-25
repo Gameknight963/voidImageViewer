@@ -1622,6 +1622,11 @@
     <ClCompile Include="..\src\small_pool.c" />
     <ClCompile Include="..\src\string.c" />
     <ClCompile Include="..\src\utf8.c" />
+    <ClCompile Include="..\src\glow.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ExceptionHandling>false</ExceptionHandling>
+      <RuntimeTypeInfo>false</RuntimeTypeInfo>
+    </ClCompile>
     <ClCompile Include="..\src\viv.c" />
     <ClCompile Include="..\src\wchar.c" />
     <ClCompile Include="..\src\webp.c" />

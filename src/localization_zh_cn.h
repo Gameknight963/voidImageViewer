@@ -303,4 +303,19 @@ static const utf8_t *_localization_string_array_zh_cn[LOCALIZATION_ID_COUNT] =
     "?????????(&G)", // LOCALIZATION_ID_BOTTOM_GLASS
     "???????????????", // LOCALIZATION_ID_GLASS_TEXT_NOTE
     "启用菜单栏玻璃效果(&M)", // LOCALIZATION_ID_MENU_GLASS
+    "文字样式(&T):", // LOCALIZATION_ID_TEXT_STYLE
+    "图标样式(&I):", // LOCALIZATION_ID_ICON_STYLE
+    "黑色文字与光晕", // LOCALIZATION_ID_STYLE_GLOW
+    "白色", // LOCALIZATION_ID_STYLE_WHITE
+    "白色与阴影", // LOCALIZATION_ID_STYLE_SHADOW
+    "黑色", // LOCALIZATION_ID_STYLE_BLACK
+    "原始颜色", // LOCALIZATION_ID_STYLE_ORIGINAL
+    "使用自定义光晕效果(&C)", // LOCALIZATION_ID_CUSTOM_GLOW
+    "使用 Direct2D 为文字和图标绘制一致的光晕，不受 Windows 主题影响。", // LOCALIZATION_ID_GLOW_DESC_CUSTOM
+    "原生文字光晕遵循当前主题。强度和颜色设置仅用于图标光晕。", // LOCALIZATION_ID_GLOW_DESC_NATIVE
+    "光晕大小 (px)(&Z):", // LOCALIZATION_ID_GLOW_SIZE
+    "光晕强度 (%)(&S):", // LOCALIZATION_ID_GLOW_STRENGTH
+    "光晕颜色(&L):", // LOCALIZATION_ID_GLOW_COLOR
+    "预览", // LOCALIZATION_ID_GLOW_PREVIEW
+    "自定义光晕不可用。请选择原生文字光晕和不带光晕的图标样式。", // LOCALIZATION_ID_GLOW_UNAVAILABLE
 };

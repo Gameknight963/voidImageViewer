@@ -71,6 +71,12 @@ BYTE config_fullscreen_background_color_b = 0;
 BYTE config_color_mode = 0;
 BYTE config_bottom_glass = 0;
 BYTE config_menu_glass = 0;
+BYTE config_text_style = 1; // glow, white, shadow, black
+BYTE config_icon_style = 2; // original, glow, white, shadow, black
+BYTE config_custom_glow = 0;
+int config_glow_size = 6;
+int config_glow_strength = 100;
+DWORD config_glow_color = 0x00ffffff;
 BYTE config_options_last_page = 0;
 int config_short_jump = 500;
 int config_medium_jump = 1000;
@@ -151,6 +157,16 @@ static void _config_load_settings_by_location(const wchar_t *path,int is_root)
             config_color_mode = mode >= 0 && mode <= 2 ? mode : 0;
             config_bottom_glass = ini_get_int(ini,(const utf8_t *)"bottom_glass",config_bottom_glass) != 0;
             config_menu_glass = ini_get_int(ini,(const utf8_t *)"menu_glass",config_menu_glass) != 0;
+            mode = ini_get_int(ini,(const utf8_t *)"text_style",config_color_mode==2 ? 1 : 0);
+            config_text_style = mode >= 0 && mode <= 3 ? mode : 1;
+            mode = ini_get_int(ini,(const utf8_t *)"icon_style",config_color_mode==2 ? 2 : 0);
+            config_icon_style = mode >= 0 && mode <= 4 ? mode : 2;
+            config_custom_glow = ini_get_int(ini,(const utf8_t *)"custom_glow",config_custom_glow) != 0;
+            mode = ini_get_int(ini,(const utf8_t *)"glow_size",config_glow_size);
+            config_glow_size = mode >= 1 && mode <= 12 ? mode : 6;
+            mode = ini_get_int(ini,(const utf8_t *)"glow_strength",config_glow_strength);
+            config_glow_strength = mode >= 0 && mode <= 100 ? mode : 100;
+            config_glow_color = ini_get_int(ini,(const utf8_t *)"glow_color",config_glow_color) & 0x00ffffff;
         }
 		config_short_jump = ini_get_int(ini,(const utf8_t *)"short_jump",config_short_jump);
 		config_medium_jump = ini_get_int(ini,(const utf8_t *)"medium_jump",config_medium_jump);
@@ -339,6 +355,12 @@ static void _config_save_settings_by_location(const wchar_t *path,int is_root)
             _config_write_int(h,"color_mode",config_color_mode);
             _config_write_int(h,"bottom_glass",config_bottom_glass);
             _config_write_int(h,"menu_glass",config_menu_glass);
+            _config_write_int(h,"text_style",config_text_style);
+            _config_write_int(h,"icon_style",config_icon_style);
+            _config_write_int(h,"custom_glow",config_custom_glow);
+            _config_write_int(h,"glow_size",config_glow_size);
+            _config_write_int(h,"glow_strength",config_glow_strength);
+            _config_write_int(h,"glow_color",config_glow_color);
 			_config_write_int(h,"short_jump",config_short_jump);
 			_config_write_int(h,"medium_jump",config_medium_jump);
 			_config_write_int(h,"long_jump",config_long_jump);

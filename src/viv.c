@@ -140,11 +140,11 @@
 // *Ctrl+C Ctrl+X = Copy/Move the current displayed image file (for copying/moving to other location in Explorer, for cases you need to do it just once)
 // *Ctrl+V = Add images to ImagePool (Instead of dropping, you can do Crtl+C in Explorer and then Ctrl+V in PhotoSIft)
 // *Open Location of file (Show in Explorer).
-// *Clear ΓÇô This command needs a Hotkey (Maybe Crtl+W like in Word), and Dialog Box to approve. -added as close ctrl + W
+// *Clear ÃŽâ€œÃƒâ€¡ÃƒÂ´ This command needs a Hotkey (Maybe Crtl+W like in Word), and Dialog Box to approve. -added as close ctrl + W
 // *Write the Dimensions (weight height) of each pic and the speed of animation.
 // *Voidimageviewer has a nice feature of controlling the animation rate (speed), to make it fast/slower.
 // *open clipboard to view image in clipboard? -no must be file based for now
-// *Mousewheel up/down ΓÇô Most of image viewers use these keys for one of two actions: 1. Next image / Previous image 2. Zoom in / Zoom out -keyboard shortcut to toggle between the two.
+// *Mousewheel up/down ÃŽâ€œÃƒâ€¡ÃƒÂ´ Most of image viewers use these keys for one of two actions: 1. Next image / Previous image 2. Zoom in / Zoom out -keyboard shortcut to toggle between the two.
 // *print -using preview to print ..
 // *play gifs atleast once.
 // *separate setting for filter quality when fullscreen/windowed. -why?
@@ -1628,10 +1628,11 @@ static void _viv_on_size(void)
 		{
 			int toolbar_wide;
 			
+            appearance_toolbar_layout(_viv_toolbar_hwnd);
 			toolbar_wide = _viv_toolbar_get_wide();
 			
 			SetWindowPos(_viv_rebar_hwnd,0,0,high - _viv_get_controls_high(),wide,_viv_get_controls_high(),SWP_NOZORDER|SWP_NOACTIVATE);
-			SetWindowPos(_viv_toolbar_hwnd,0,(wide / 2) - (toolbar_wide /2),6,toolbar_wide,_viv_get_controls_high() - 6,SWP_NOZORDER|SWP_NOACTIVATE);
+			SetWindowPos(_viv_toolbar_hwnd,0,(wide / 2) - (toolbar_wide /2),0,toolbar_wide,_viv_get_controls_high(),SWP_NOZORDER|SWP_NOACTIVATE);
 			
 			high -= _viv_get_controls_high();
 		}
@@ -7964,16 +7965,40 @@ static INT_PTR CALLBACK _viv_options_appearance_proc(HWND hwnd,UINT msg,WPARAM w
         os_SetDlgItemText_localization_id(hwnd,IDC_COLOR_MODE_LABEL,LOCALIZATION_ID_COLOR_MODE);
         os_SetDlgItemText_localization_id(hwnd,IDC_BOTTOM_GLASS,LOCALIZATION_ID_BOTTOM_GLASS);
         os_SetDlgItemText_localization_id(hwnd,IDC_MENU_GLASS,LOCALIZATION_ID_MENU_GLASS);
-        os_SetDlgItemText_localization_id(hwnd,IDC_GLASS_TEXT_NOTE,LOCALIZATION_ID_GLASS_TEXT_NOTE);
         os_ComboBox_AddString_localization_id(hwnd,IDC_COLOR_MODE,LOCALIZATION_ID_COLOR_SYSTEM);
         os_ComboBox_AddString_localization_id(hwnd,IDC_COLOR_MODE,LOCALIZATION_ID_COLOR_LIGHT);
         os_ComboBox_AddString_localization_id(hwnd,IDC_COLOR_MODE,LOCALIZATION_ID_COLOR_DARK);
         ComboBox_SetCurSel(GetDlgItem(hwnd,IDC_COLOR_MODE),config_color_mode);
         CheckDlgButton(hwnd,IDC_BOTTOM_GLASS,config_bottom_glass ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(hwnd,IDC_MENU_GLASS,config_menu_glass ? BST_CHECKED : BST_UNCHECKED);
+        appearance_page_init(hwnd);
         PostMessage(hwnd,APPEARANCE_WM_APPLY,0,0);
     }
     if (msg == APPEARANCE_WM_APPLY) appearance_dialog(hwnd);
+    if (msg == WM_DRAWITEM && appearance_page_draw(hwnd,(DRAWITEMSTRUCT *)lParam)) return TRUE;
+    if (msg == WM_HSCROLL)
+    {
+        int id=GetDlgCtrlID((HWND)lParam);
+        if (id==IDC_GLOW_SIZE_SLIDER || id==IDC_GLOW_STRENGTH_SLIDER)
+        {
+            SetDlgItemInt(hwnd,id==IDC_GLOW_SIZE_SLIDER ? IDC_GLOW_SIZE : IDC_GLOW_STRENGTH,
+                (UINT)SendMessage((HWND)lParam,TBM_GETPOS,0,0),FALSE);
+            appearance_page_update(hwnd);
+            return TRUE;
+        }
+    }
+    if (msg == WM_COMMAND)
+    {
+        if (LOWORD(wParam)==IDC_GLOW_COLOR && HIWORD(wParam)==BN_CLICKED)
+        {
+            COLORREF selected=(COLORREF)GetWindowLongPtr(GetDlgItem(hwnd,IDC_GLOW_COLOR),GWLP_USERDATA);
+            if (os_choose_color(hwnd,&selected)) SetWindowLongPtr(GetDlgItem(hwnd,IDC_GLOW_COLOR),GWLP_USERDATA,selected);
+            appearance_page_update(hwnd);
+            return TRUE;
+        }
+        if (HIWORD(wParam)==CBN_SELCHANGE || HIWORD(wParam)==EN_CHANGE || LOWORD(wParam)==IDC_CUSTOM_GLOW)
+            appearance_page_update(hwnd);
+    }
     return FALSE;
 }
 
@@ -8710,12 +8735,15 @@ static INT_PTR CALLBACK _viv_options_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARA
 						
 						params[0] = 0;
 						
+                        if (!appearance_page_save(GetDlgItem(hwnd,VIV_ID_OPTIONS_APPEARANCE))) return TRUE;
                         config_color_mode = ComboBox_GetCurSel(GetDlgItem(GetDlgItem(hwnd,VIV_ID_OPTIONS_APPEARANCE),IDC_COLOR_MODE));
                         config_bottom_glass = IsDlgButtonChecked(GetDlgItem(hwnd,VIV_ID_OPTIONS_APPEARANCE),IDC_BOTTOM_GLASS) == BST_CHECKED;
                         config_menu_glass = IsDlgButtonChecked(GetDlgItem(hwnd,VIV_ID_OPTIONS_APPEARANCE),IDC_MENU_GLASS) == BST_CHECKED;
                         appearance_refresh();
                         appearance_window(_viv_hwnd);
                         EnumChildWindows(_viv_hwnd,appearance_child,0);
+                        _viv_controls_show(0);
+                        _viv_controls_show(config_show_controls);
                         _viv_on_size();
                         RedrawWindow(_viv_hwnd,NULL,NULL,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_FRAME);
 						general_page = GetDlgItem(hwnd,VIV_ID_OPTIONS_GENERAL);
@@ -11083,16 +11111,17 @@ static void _viv_controls_show(int show)
 			SendMessage(_viv_toolbar_hwnd,TB_SETEXTENDEDSTYLE,0,TBSTYLE_EX_MIXEDBUTTONS|TBSTYLE_EX_HIDECLIPPEDBUTTONS|TBSTYLE_EX_DOUBLEBUFFER);
 			SendMessage(_viv_toolbar_hwnd,TB_BUTTONSTRUCTSIZE,sizeof(TBBUTTON),0);
 			
-			_viv_toolbar_image_list = ImageList_Create((16 * os_logical_wide) / 96,(16 * os_logical_high) / 96,ILC_COLOR24|ILC_MASK,0,0);
+			_viv_toolbar_image_list = ImageList_Create(appearance_toolbar_canvas(os_logical_wide),appearance_toolbar_canvas(os_logical_high),ILC_COLOR32|ILC_MASK,0,0);
 			
-			ImageList_AddIcon(_viv_toolbar_image_list,LoadIcon(os_hinstance,(LPCTSTR)IDI_PREV));
-			ImageList_AddIcon(_viv_toolbar_image_list,LoadIcon(os_hinstance,(LPCTSTR)IDI_PLAY));
-			ImageList_AddIcon(_viv_toolbar_image_list,LoadIcon(os_hinstance,(LPCTSTR)IDI_PAUSE));
-			ImageList_AddIcon(_viv_toolbar_image_list,LoadIcon(os_hinstance,(LPCTSTR)IDI_NEXT));
-			ImageList_AddIcon(_viv_toolbar_image_list,LoadIcon(os_hinstance,(LPCTSTR)IDI_BESTFIT));
-			ImageList_AddIcon(_viv_toolbar_image_list,LoadIcon(os_hinstance,(LPCTSTR)IDI_1TO1));
+			appearance_toolbar_add_icon(_viv_toolbar_image_list,IDI_PREV);
+			appearance_toolbar_add_icon(_viv_toolbar_image_list,IDI_PLAY);
+			appearance_toolbar_add_icon(_viv_toolbar_image_list,IDI_PAUSE);
+			appearance_toolbar_add_icon(_viv_toolbar_image_list,IDI_NEXT);
+			appearance_toolbar_add_icon(_viv_toolbar_image_list,IDI_BESTFIT);
+			appearance_toolbar_add_icon(_viv_toolbar_image_list,IDI_1TO1);
 
 			SendMessage(_viv_toolbar_hwnd,TB_SETIMAGELIST,0,(LPARAM)_viv_toolbar_image_list);
+            appearance_toolbar_layout(_viv_toolbar_hwnd);
 
 			{
 				TBBUTTON buttons[8];
@@ -11531,7 +11560,7 @@ static int _viv_get_controls_high(void)
 {
 	if (_viv_toolbar_hwnd)
 	{
-		return (32 * os_logical_high) / 96;
+		return appearance_toolbar_height();
 	}
 	
 	return 0;
@@ -11539,7 +11568,7 @@ static int _viv_get_controls_high(void)
 
 static LRESULT CALLBACK _viv_rebar_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-    if ((appearance_dark || appearance_glass) && (msg == WM_PAINT || msg == WM_PRINTCLIENT))
+    if (!appearance_high_contrast && (msg == WM_PAINT || msg == WM_PRINTCLIENT))
     {
         PAINTSTRUCT ps;
         RECT rect;
@@ -11577,7 +11606,7 @@ static LRESULT CALLBACK _viv_rebar_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM 
 						{
 							case NM_CUSTOMDRAW:
 							{
-                                if (appearance_dark || appearance_glass)
+                                if (!appearance_high_contrast)
                                     return appearance_toolbar_draw(_viv_toolbar_hwnd,(NMTBCUSTOMDRAW *)lParam,_viv_toolbar_image_list);
 
 								switch(((NMTBCUSTOMDRAW *)lParam)->nmcd.dwDrawStage)
@@ -11656,7 +11685,7 @@ static LRESULT CALLBACK _viv_rebar_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM 
 
 static LRESULT CALLBACK _viv_status_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-    if (appearance_dark || appearance_glass)
+    if (!appearance_high_contrast)
     {
         if (msg == WM_ERASEBKGND) return 1;
         if (msg == WM_PAINT || msg == WM_PRINTCLIENT)
@@ -11732,7 +11761,7 @@ static int _viv_toolbar_get_wide(void)
 		
 		if (got_x)
 		{
-			return max_x - min_x;
+			return max_x - min_x + 2*appearance_toolbar_gutter();
 		}
 
 /*		
@@ -11813,6 +11842,8 @@ static void _viv_toolbar_update_buttons(void)
 		tbbinfo.fsState = ((_viv_zoom_pos == 0) && (!_viv_1to1)) ? (0) : (TBSTATE_ENABLED);
 		
 		SendMessage(_viv_toolbar_hwnd,TB_SETBUTTONINFO,VIV_ID_VIEW_BESTFIT,(LPARAM)&tbbinfo);
+        // State changes also affect the halo outside the button hit rectangle.
+        InvalidateRect(_viv_toolbar_hwnd,NULL,FALSE);
 	}
 }
 

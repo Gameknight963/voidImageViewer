@@ -23,6 +23,24 @@ static DWORD appearance_build;
 static HBRUSH appearance_background;
 static int appearance_top_glass_height;
 
+extern int __cdecl glow_available(void);
+extern int __cdecl glow_render(const DWORD *,DWORD *,unsigned,unsigned,unsigned,unsigned,COLORREF);
+
+typedef struct appearance_style_s
+{
+    int text,icon,size,strength,custom;
+    COLORREF color;
+} appearance_style_t;
+
+static appearance_style_t appearance_style(void)
+{
+    appearance_style_t style;
+    style.text=config_text_style; style.icon=config_icon_style;
+    style.size=config_glow_size; style.strength=config_glow_strength;
+    style.custom=config_custom_glow; style.color=config_glow_color;
+    return style;
+}
+
 static COLORREF appearance_bg(void) { return appearance_dark ? RGB(32,32,32) : GetSysColor(COLOR_BTNFACE); }
 static COLORREF appearance_fg(void) { return appearance_dark ? RGB(240,240,240) : GetSysColor(COLOR_BTNTEXT); }
 
@@ -203,35 +221,241 @@ static void appearance_opaque_image_top(HWND hwnd,HDC dc)
     }
 }
 
-static void appearance_text(HWND hwnd,HDC dc,LPCWSTR text,RECT *rect,UINT flags,int glass)
+static void appearance_dispose(appearance_buffer_t *layer)
 {
-    HTHEME theme = appearance_open_theme ? appearance_open_theme(hwnd,L"WINDOW") : NULL;
-    if (glass && theme && appearance_theme_text)
+    SelectObject(layer->dc,layer->old);
+    DeleteObject(layer->bitmap);
+    DeleteDC(layer->dc);
+}
+
+static void appearance_blend_layer(HDC dc,const appearance_buffer_t *layer,int dx,int dy)
+{
+    BITMAP bitmap;
+    int x,y,stride,height;
+    if (!GetObject(GetCurrentObject(dc,OBJ_BITMAP),sizeof(bitmap),&bitmap) || !bitmap.bmBits || bitmap.bmBitsPixel != 32) return;
+    stride=bitmap.bmWidthBytes/4;
+    height=bitmap.bmHeight < 0 ? -bitmap.bmHeight : bitmap.bmHeight;
+    GdiFlush();
+    for (y=0;y<layer->height;y++) for (x=0;x<layer->width;x++)
     {
-        DTTOPTS options;
-        os_zero_memory(&options,sizeof(options));
-        options.dwSize = sizeof(options);
-        options.dwFlags = DTT_COMPOSITED | DTT_TEXTCOLOR;
-        if (appearance_dark)
-        {
-            options.dwFlags |= DTT_GLOWSIZE | DTT_SHADOWTYPE;
-            options.iGlowSize = 0;
-            options.iTextShadowType = 0; // TST_NONE
-        }
+        DWORD source,destination,alpha,inverse,r,g,b,a;
+        DWORD *pixel;
+        if (x+dx<0 || y+dy<0 || x+dx>=bitmap.bmWidth || y+dy>=height) continue;
+        source=layer->pixels[y*layer->width+x];
+        alpha=source>>24;
+        if (!alpha) continue;
+        pixel=(DWORD *)bitmap.bmBits+(y+dy)*stride+x+dx;
+        destination=*pixel;
+        inverse=255-alpha;
+        a=alpha+(destination>>24)*inverse/255;
+        r=((source>>16)&255)+((destination>>16)&255)*inverse/255;
+        g=((source>>8)&255)+((destination>>8)&255)*inverse/255;
+        b=(source&255)+(destination&255)*inverse/255;
+        *pixel=(a<<24)|(r<<16)|(g<<8)|b;
+    }
+}
+
+static void appearance_render_layer(HDC dc,appearance_buffer_t *layer,int x,int y,int effect,const appearance_style_t *style)
+{
+    if (effect)
+    {
+        appearance_buffer_t halo=*layer;
+        int count=layer->width*layer->height;
+        halo.pixels=mem_alloc(count*4);
+        os_zero_memory(halo.pixels,count*4);
+        if (effect==1)
+            glow_render(layer->pixels,halo.pixels,layer->width,layer->height,MulDiv(style->size,os_logical_high,96),style->strength,style->color);
         else
         {
-            options.dwFlags |= DTT_GLOWSIZE;
-            options.iGlowSize = MulDiv(6,os_logical_high,96);
+            int px,py,ox,oy;
+            int radius=MulDiv(1,os_logical_high,96);
+            for (py=0;py<layer->height;py++) for (px=0;px<layer->width;px++)
+            {
+                DWORD alpha=0;
+                for (oy=-radius;oy<=radius;oy++) for (ox=-radius;ox<=radius;ox++)
+                {
+                    if (px+ox>=0 && py+oy>=0 && px+ox<layer->width && py+oy<layer->height)
+                    {
+                        DWORD coverage=layer->pixels[(py+oy)*layer->width+px+ox]>>24;
+                        if (coverage>alpha) alpha=coverage;
+                    }
+                }
+                halo.pixels[py*layer->width+px]=alpha<<24;
+            }
         }
-        options.crText = appearance_dark ? RGB(255,255,255) : appearance_fg();
-        appearance_theme_text(theme,dc,0,0,text,-1,flags,rect,&options);
+        appearance_blend_layer(dc,&halo,x,y);
+        mem_free(halo.pixels);
     }
-    else
+    appearance_blend_layer(dc,layer,x,y);
+}
+
+static void appearance_styled_text(HWND hwnd,HDC dc,LPCWSTR text,RECT *rect,UINT flags,const appearance_style_t *style)
+{
+    COLORREF color=style->text==0 || style->text==3 ? RGB(0,0,0) : RGB(255,255,255);
+    int pad=MulDiv(style->size+2,os_logical_high,96);
+    appearance_buffer_t layer;
+    RECT bounds,local;
+    int i;
+    if (style->text==0 && !style->custom && appearance_open_theme && appearance_theme_text)
     {
-        SetTextColor(dc,appearance_fg());
-        DrawTextW(dc,text,-1,rect,flags);
+        HTHEME theme=appearance_open_theme(NULL,L"CompositedWindow::Window");
+        if (!theme) theme=appearance_open_theme(hwnd,L"WINDOW");
+        if (theme)
+        {
+            DTTOPTS options;
+            HRESULT result;
+            os_zero_memory(&options,sizeof(options));
+            options.dwSize=sizeof(options);
+            options.dwFlags=DTT_COMPOSITED|DTT_TEXTCOLOR|DTT_GLOWSIZE|DTT_SHADOWTYPE;
+            options.crText=color;
+            options.iGlowSize=MulDiv(style->size,os_logical_high,96);
+            result=appearance_theme_text(theme,dc,0,0,text,-1,flags,rect,&options);
+            appearance_close_theme(theme);
+            if (SUCCEEDED(result)) return;
+        }
     }
-    if (theme) appearance_close_theme(theme);
+    bounds=*rect;
+    InflateRect(&bounds,pad,pad);
+    if (!appearance_begin(dc,&bounds,&layer,1)) return;
+    SelectObject(layer.dc,GetCurrentObject(dc,OBJ_FONT));
+    local=*rect;
+    OffsetRect(&local,-bounds.left,-bounds.top);
+    SetTextColor(layer.dc,RGB(255,255,255));
+    DrawTextW(layer.dc,text,-1,&local,flags);
+    GdiFlush();
+    // GDI's RGB glyph coverage becomes a grayscale alpha mask. This path does
+    // not require a visual style or a theme-provided text-glow implementation.
+    for (i=0;i<layer.width*layer.height;i++)
+    {
+        DWORD pixel=layer.pixels[i];
+        DWORD alpha=(((pixel>>16)&255)*77+((pixel>>8)&255)*150+(pixel&255)*29)/256;
+        layer.pixels[i]=(alpha<<24)|((GetRValue(color)*alpha/255)<<16)|((GetGValue(color)*alpha/255)<<8)|(GetBValue(color)*alpha/255);
+    }
+    appearance_render_layer(dc,&layer,bounds.left,bounds.top,
+        style->text==0 && style->custom ? 1 : style->text==2 ? 2 : 0,style);
+    appearance_dispose(&layer);
+}
+
+static void appearance_text(HWND hwnd,HDC dc,LPCWSTR text,RECT *rect,UINT flags,int glass)
+{
+    appearance_style_t style=appearance_style();
+    if (appearance_high_contrast)
+    {
+        SetTextColor(dc,GetSysColor(COLOR_WINDOWTEXT));
+        DrawTextW(dc,text,-1,rect,flags);
+        return;
+    }
+    appearance_styled_text(hwnd,dc,text,rect,flags,&style);
+}
+
+static void appearance_icon(HDC dc,HICON icon,int x,int y,int width,int height,int enabled,const appearance_style_t *style)
+{
+    int pad=MulDiv(style->size+2,os_logical_high,96);
+    RECT bounds={0,0,width+pad*2,height+pad*2};
+    appearance_buffer_t layer;
+    ICONINFO info;
+    int px,py,has_alpha=0;
+    if (!icon || !appearance_begin(dc,&bounds,&layer,1)) return;
+    DrawIconEx(layer.dc,pad,pad,icon,width,height,0,NULL,DI_NORMAL);
+    GdiFlush();
+    for (py=0;py<height;py++) for (px=0;px<width;px++)
+        if (layer.pixels[(py+pad)*layer.width+px+pad]>>24) has_alpha=1;
+    if (GetIconInfo(icon,&info))
+    {
+        HDC mask=CreateCompatibleDC(dc);
+        HGDIOBJ previous=SelectObject(mask,info.hbmMask);
+        BITMAP mask_info;
+        GetObject(info.hbmMask,sizeof(mask_info),&mask_info);
+        for (py=0;py<height;py++) for (px=0;px<width;px++)
+        {
+            DWORD *pixel=layer.pixels+(py+pad)*layer.width+px+pad;
+            DWORD alpha=*pixel>>24,r=(*pixel>>16)&255,g=(*pixel>>8)&255,b=*pixel&255;
+            if (!has_alpha) alpha=GetPixel(mask,MulDiv(px,mask_info.bmWidth,width),MulDiv(py,mask_info.bmWidth,width))==RGB(0,0,0) ? 255 : 0;
+            if (style->icon)
+            {
+                r=g=b=(style->icon==2 || style->icon==3) ? alpha : 0;
+            }
+            if (!enabled)
+            {
+                DWORD gray=(r*77+g*150+b*29)/256;
+                alpha=alpha*100/255;
+                r=g=b=gray*100/255;
+            }
+            *pixel=alpha ? (alpha<<24)|(r<<16)|(g<<8)|b : 0;
+        }
+        SelectObject(mask,previous);
+        DeleteDC(mask);
+        DeleteObject(info.hbmMask);
+        if (info.hbmColor) DeleteObject(info.hbmColor);
+    }
+    appearance_render_layer(dc,&layer,x-pad,y-pad,style->icon==1 ? 1 : style->icon==3 ? 2 : 0,style);
+    appearance_dispose(&layer);
+}
+
+// Keep native hit targets fixed. Only the shared paint surface needs room
+// outside the first and last icons; this gutter never depends on glow size.
+static int appearance_toolbar_gutter(void)
+{
+    return MulDiv(14,os_logical_wide,96);
+}
+
+static int appearance_toolbar_canvas(int dpi)
+{
+    return MulDiv(16,dpi,96);
+}
+
+static void appearance_toolbar_add_icon(HIMAGELIST images,int resource)
+{
+    HICON icon=(HICON)LoadImage(os_hinstance,MAKEINTRESOURCE(resource),IMAGE_ICON,
+        MulDiv(16,os_logical_wide,96),MulDiv(16,os_logical_high,96),0);
+    if (icon) { ImageList_AddIcon(images,icon); DestroyIcon(icon); }
+}
+
+static int appearance_toolbar_height(void)
+{
+    return MulDiv(32,os_logical_high,96);
+}
+
+static void appearance_toolbar_layout(HWND hwnd)
+{
+    int image_width=0,image_height=0;
+    int width;
+    ImageList_GetIconSize((HIMAGELIST)SendMessage(hwnd,TB_GETIMAGELIST,0,0),&image_width,&image_height);
+    width=image_width+MulDiv(8,os_logical_wide,96);
+    int height=appearance_toolbar_height();
+    DWORD size=MAKELONG(width,height);
+    RECT first={0,0,0,0};
+    SendMessage(hwnd,TB_GETITEMRECT,0,(LPARAM)&first);
+    if ((DWORD)(UINT_PTR)GetPropW(hwnd,L"VIVAppearanceButtonSize")!=size || first.right-first.left!=width || first.bottom-first.top<height)
+    {
+        TBMETRICS metrics;
+        int i,count;
+        os_zero_memory(&metrics,sizeof(metrics));
+        metrics.cbSize=sizeof(metrics);
+        metrics.dwMask=TBMF_PAD;
+        metrics.cxPad=width-image_width;
+        metrics.cyPad=height-image_height;
+        SendMessage(hwnd,TB_SETINDENT,appearance_toolbar_gutter(),0);
+        SendMessage(hwnd,TB_SETMETRICS,0,(LPARAM)&metrics);
+        SendMessage(hwnd,TB_SETBUTTONWIDTH,0,MAKELPARAM(width,width));
+        SendMessage(hwnd,TB_SETBUTTONSIZE,0,MAKELPARAM(width,height));
+        count=(int)SendMessage(hwnd,TB_BUTTONCOUNT,0,0);
+        for (i=0;i<count;i++)
+        {
+            TBBUTTON button;
+            if (SendMessage(hwnd,TB_GETBUTTON,i,(LPARAM)&button) && !(button.fsStyle&TBSTYLE_SEP))
+            {
+                TBBUTTONINFO info;
+                os_zero_memory(&info,sizeof(info));
+                info.cbSize=sizeof(info);
+                info.dwMask=TBIF_SIZE;
+                info.cx=width;
+                SendMessage(hwnd,TB_SETBUTTONINFO,button.idCommand,(LPARAM)&info);
+            }
+        }
+        SendMessage(hwnd,TB_AUTOSIZE,0,0);
+        SetPropW(hwnd,L"VIVAppearanceButtonSize",(HANDLE)(UINT_PTR)size);
+    }
 }
 
 static LRESULT CALLBACK appearance_control_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data)
@@ -318,7 +542,8 @@ static LRESULT CALLBACK appearance_control_proc(HWND hwnd,UINT msg,WPARAM wp,LPA
             {
                 SelectObject(dc,(HFONT)SendMessage(hwnd,WM_GETFONT,0,0));
                 SetBkMode(dc,TRANSPARENT);
-                appearance_text(hwnd,dc,text,&tab,DT_CENTER|DT_VCENTER|DT_SINGLELINE,0);
+                SetTextColor(dc,appearance_fg());
+                DrawTextW(dc,text,-1,&tab,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
             }
             if (msg == WM_PAINT) EndPaint(hwnd,&ps);
             return 0;
@@ -408,8 +633,11 @@ static void appearance_status_paint(HWND hwnd,HDC target)
     if (GetWindowLongPtr(hwnd,GWL_STYLE) & SBARS_SIZEGRIP)
     {
         RECT grip = rect;
+        appearance_style_t style=appearance_style();
+        style.text=style.icon==0 ? (appearance_dark ? 1 : 3) : style.icon-1;
+        style.custom=1; // The grip is a glyph, but follows the icon settings.
         grip.left = grip.right - MulDiv(14,os_logical_wide,96);
-        appearance_text(hwnd,buffer.dc,L"\x25e2",&grip,DT_RIGHT|DT_BOTTOM|DT_SINGLELINE,appearance_glass);
+        appearance_styled_text(hwnd,buffer.dc,L"\x25e2",&grip,DT_RIGHT|DT_BOTTOM|DT_SINGLELINE,&style);
     }
     appearance_end(target,&rect,&buffer,appearance_glass);
 }
@@ -460,111 +688,63 @@ static void appearance_toolbar_highlight(appearance_buffer_t *buffer,UINT state)
 
 static LRESULT appearance_toolbar_draw(HWND hwnd,NMTBCUSTOMDRAW *draw,HIMAGELIST images)
 {
-    if (draw->nmcd.dwDrawStage == CDDS_PREPAINT)
+    RECT bounds;
+    appearance_buffer_t buffer,icons;
+    appearance_style_t style=appearance_style(),sharp=style;
+    int index,count,hot,iw=0,ih=0;
+    if (draw->nmcd.dwDrawStage != CDDS_PREPAINT) return CDRF_DODEFAULT;
+    GetClientRect(hwnd,&bounds);
+    if (!appearance_begin(draw->nmcd.hdc,&bounds,&buffer,appearance_glass)) return CDRF_DODEFAULT;
+    if (!appearance_begin(buffer.dc,&bounds,&icons,1))
     {
-        RECT rect;
-        appearance_buffer_t buffer;
-        GetClientRect(hwnd,&rect);
-        if (appearance_begin(draw->nmcd.hdc,&rect,&buffer,appearance_glass))
-            appearance_end(draw->nmcd.hdc,&rect,&buffer,appearance_glass);
-        return CDRF_NOTIFYITEMDRAW;
+        appearance_dispose(&buffer);
+        return CDRF_DODEFAULT;
     }
-    if (draw->nmcd.dwDrawStage == CDDS_ITEMPREPAINT)
+    count=(int)SendMessage(hwnd,TB_BUTTONCOUNT,0,0);
+    hot=(int)SendMessage(hwnd,TB_GETHOTITEM,0,0);
+    ImageList_GetIconSize(images,&iw,&ih);
+    // Gather silhouettes before blurring so neighboring halos blend together.
+    // Sharp icons are composited last, keeping them clear over the shared glow.
+    if (sharp.icon==1) sharp.icon=4;
+    for (index=0;index<count;index++)
     {
-        appearance_buffer_t buffer;
-        RECT bounds = draw->nmcd.rc, rect;
         TBBUTTON button;
-        int index, iw = 0, ih = 0, x, y, enabled;
-        WCHAR text[512];
+        RECT rect,highlight_bounds;
+        appearance_buffer_t highlight;
         HICON icon;
-        index = (int)SendMessage(hwnd,TB_COMMANDTOINDEX,draw->nmcd.dwItemSpec,0);
-        if (index < 0 || !SendMessage(hwnd,TB_GETBUTTON,index,(LPARAM)&button)) return CDRF_DODEFAULT;
-        if (button.fsStyle & TBSTYLE_SEP) return CDRF_SKIPDEFAULT;
-        enabled = (button.fsState & TBSTATE_ENABLED) != 0;
-        if (!appearance_begin(draw->nmcd.hdc,&bounds,&buffer,appearance_glass)) return CDRF_DODEFAULT;
-        SetRect(&rect,0,0,buffer.width,buffer.height);
-        if (enabled) appearance_toolbar_highlight(&buffer,draw->nmcd.uItemState);
-        ImageList_GetIconSize(images,&iw,&ih);
-        x = MulDiv(5,os_logical_wide,96);
-        y = (buffer.height - ih)/2;
-        icon = ImageList_GetIcon(images,button.iBitmap,ILD_NORMAL);
+        UINT state=0;
+        int enabled,x,y;
+        if (!SendMessage(hwnd,TB_GETBUTTON,index,(LPARAM)&button) ||
+            (button.fsStyle&TBSTYLE_SEP) || (button.fsState&TBSTATE_HIDDEN) ||
+            !SendMessage(hwnd,TB_GETITEMRECT,index,(LPARAM)&rect)) continue;
+        enabled=(button.fsState&TBSTATE_ENABLED)!=0;
+        if (index==hot) state|=CDIS_HOT;
+        if (button.fsState&TBSTATE_PRESSED) state|=CDIS_SELECTED;
+        if (button.fsState&TBSTATE_CHECKED) state|=CDIS_CHECKED;
+        if (GetFocus()==hwnd && index==hot) state|=CDIS_FOCUS;
+        highlight_bounds=rect;
+        InflateRect(&highlight_bounds,0,-MulDiv(6,os_logical_high,96));
+        if (enabled && appearance_begin(buffer.dc,&highlight_bounds,&highlight,1))
+        {
+            appearance_toolbar_highlight(&highlight,state);
+            appearance_blend_layer(buffer.dc,&highlight,highlight_bounds.left,highlight_bounds.top);
+            appearance_dispose(&highlight);
+        }
+        x=(rect.left+rect.right-iw)/2;
+        y=(rect.top+rect.bottom-ih)/2;
+        icon=ImageList_GetIcon(images,button.iBitmap,ILD_NORMAL);
         if (icon)
         {
-            ICONINFO info;
-            DrawIconEx(buffer.dc,x,y,icon,iw,ih,0,NULL,DI_NORMAL);
-            // Old masked toolbar icons have no alpha. Recover coverage from
-            // their AND mask without making their transparent surround opaque.
-            if (GetIconInfo(icon,&info))
-            {
-                HDC mask = CreateCompatibleDC(buffer.dc);
-                HGDIOBJ old = SelectObject(mask,info.hbmMask);
-                int ix,iy;
-                GdiFlush();
-                for (iy=0;iy<ih;iy++) for (ix=0;ix<iw;ix++)
-                {
-                    int px = x+ix, py = y+iy;
-                    if (px>=0 && py>=0 && px<buffer.width && py<buffer.height && GetPixel(mask,ix,iy)==RGB(0,0,0))
-                    {
-                        DWORD *pixel = buffer.pixels + py*buffer.width + px;
-                        if (!(*pixel & 0xff000000)) *pixel |= 0xff000000;
-                        // The transport icons are black masked glyphs. Use a
-                        // light glyph in dark mode while retaining coverage.
-                        if (appearance_dark && button.iBitmap < 4)
-                        {
-                            DWORD alpha = *pixel >> 24;
-                            DWORD color = alpha * 240 / 255;
-                            *pixel = (alpha << 24) | (color << 16) | (color << 8) | color;
-                        }
-                        if (!enabled)
-                        {
-                            DWORD gray = (77*((*pixel >> 16)&255) + 150*((*pixel >> 8)&255) + 29*(*pixel&255))/256;
-                            if (appearance_glass)
-                            {
-                                DWORD alpha = (*pixel >> 24)*100/255;
-                                gray = gray*100/255;
-                                *pixel = (alpha << 24) | (gray << 16) | (gray << 8) | gray;
-                            }
-                            else
-                            {
-                                COLORREF background = appearance_bg();
-                                DWORD r = (gray*100 + GetRValue(background)*155)/255;
-                                DWORD g = (gray*100 + GetGValue(background)*155)/255;
-                                DWORD b = (gray*100 + GetBValue(background)*155)/255;
-                                *pixel = 0xff000000 | (r << 16) | (g << 8) | b;
-                            }
-                        }
-                    }
-                }
-                SelectObject(mask,old);
-                DeleteDC(mask);
-                DeleteObject(info.hbmMask);
-                if (info.hbmColor) DeleteObject(info.hbmColor);
-            }
+            appearance_icon(icons.dc,icon,x,y,iw,ih,enabled,&sharp);
             DestroyIcon(icon);
         }
-        // Toolbar strings are retained for accessibility and tooltips even
-        // when a button is configured to show only its icon.
-        if (button.iString)
-        {
-            int length = (int)SendMessageW(hwnd,TB_GETBUTTONTEXTW,button.idCommand,0);
-            if (length > 0 && length < 512 && buffer.width > iw + x*3)
-            {
-                SendMessageW(hwnd,TB_GETBUTTONTEXTW,button.idCommand,(LPARAM)text);
-                SelectObject(buffer.dc,(HFONT)SendMessage(hwnd,WM_GETFONT,0,0));
-                rect.left = x + iw + MulDiv(4,os_logical_wide,96);
-                rect.right -= x;
-                appearance_text(hwnd,buffer.dc,text,&rect,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX,appearance_glass);
-            }
-        }
-        if (enabled && (draw->nmcd.uItemState & CDIS_FOCUS))
-        {
-            InflateRect(&rect,-2,-2);
-            DrawFocusRect(buffer.dc,&rect);
-        }
-        appearance_end(draw->nmcd.hdc,&bounds,&buffer,appearance_glass);
-        return CDRF_SKIPDEFAULT;
+        // Native toolbar strings remain available to accessibility and tooltips.
+        if (enabled && (state&CDIS_FOCUS)) DrawFocusRect(buffer.dc,&highlight_bounds);
     }
-    return CDRF_DODEFAULT;
+    appearance_render_layer(buffer.dc,&icons,0,0,style.icon==1 ? 1 : 0,&style);
+    appearance_dispose(&icons);
+    appearance_end(draw->nmcd.hdc,&bounds,&buffer,appearance_glass);
+    return CDRF_SKIPDEFAULT;
 }
 
 // The menu bar still uses light colors after dark-mode opt-in. These private
@@ -585,7 +765,7 @@ typedef struct appearance_uah_draw_s
 
 static int appearance_menu(HWND hwnd,UINT msg,LPARAM lp)
 {
-    if (!appearance_dark && !appearance_menu_glass) return 0;
+    if (appearance_high_contrast) return 0;
     if (msg == 0x0091) // WM_UAHDRAWMENU
     {
         appearance_uah_menu_t *menu = (void *)lp;
@@ -636,6 +816,132 @@ static int appearance_menu(HWND hwnd,UINT msg,LPARAM lp)
         appearance_text(hwnd,buffer.dc,text,&rect,flags,appearance_menu_glass);
         appearance_end(item->draw.hDC,&bounds,&buffer,appearance_menu_glass);
         if (font) DeleteObject(font);
+        return 1;
+    }
+    return 0;
+}
+
+static appearance_style_t appearance_page_read(HWND hwnd)
+{
+    appearance_style_t style=appearance_style();
+    BOOL valid;
+    int value;
+    value=ComboBox_GetCurSel(GetDlgItem(hwnd,IDC_TEXT_STYLE));
+    if (value>=0 && value<=3) style.text=value;
+    value=ComboBox_GetCurSel(GetDlgItem(hwnd,IDC_ICON_STYLE));
+    if (value>=0 && value<=4) style.icon=value;
+    style.custom=IsDlgButtonChecked(hwnd,IDC_CUSTOM_GLOW)==BST_CHECKED;
+    value=GetDlgItemInt(hwnd,IDC_GLOW_SIZE,&valid,FALSE);
+    if (valid) style.size=value<1 ? 1 : value>12 ? 12 : value;
+    value=GetDlgItemInt(hwnd,IDC_GLOW_STRENGTH,&valid,FALSE);
+    if (valid) style.strength=value<0 ? 0 : value>100 ? 100 : value;
+    style.color=(COLORREF)GetWindowLongPtr(GetDlgItem(hwnd,IDC_GLOW_COLOR),GWLP_USERDATA);
+    return style;
+}
+
+static void appearance_page_update(HWND hwnd)
+{
+    appearance_style_t style=appearance_page_read(hwnd);
+    int glow=style.text==0 || style.icon==1;
+    int custom=style.icon==1 || (style.text==0 && style.custom);
+    int size_ids[]={IDC_GLOW_SIZE,IDC_GLOW_SIZE_SPIN,IDC_GLOW_SIZE_SLIDER};
+    int effect_ids[]={IDC_GLOW_STRENGTH,IDC_GLOW_STRENGTH_SPIN,IDC_GLOW_STRENGTH_SLIDER,IDC_GLOW_COLOR};
+    int i;
+    for (i=0;i<3;i++) EnableWindow(GetDlgItem(hwnd,size_ids[i]),glow);
+    for (i=0;i<4;i++) EnableWindow(GetDlgItem(hwnd,effect_ids[i]),custom);
+    SendDlgItemMessage(hwnd,IDC_GLOW_SIZE_SLIDER,TBM_SETPOS,TRUE,style.size);
+    SendDlgItemMessage(hwnd,IDC_GLOW_STRENGTH_SLIDER,TBM_SETPOS,TRUE,style.strength);
+    EnableWindow(GetDlgItem(hwnd,IDC_CUSTOM_GLOW),glow);
+    os_SetDlgItemText_localization_id(hwnd,IDC_GLOW_DESCRIPTION,
+        custom && !glow_available() ? LOCALIZATION_ID_GLOW_UNAVAILABLE :
+        style.custom ? LOCALIZATION_ID_GLOW_DESC_CUSTOM : LOCALIZATION_ID_GLOW_DESC_NATIVE);
+    InvalidateRect(GetDlgItem(hwnd,IDC_GLOW_PREVIEW),NULL,FALSE);
+    InvalidateRect(GetDlgItem(hwnd,IDC_GLOW_COLOR),NULL,FALSE);
+}
+
+static void appearance_page_init(HWND hwnd)
+{
+    appearance_style_t style=appearance_style();
+    int labels[]={IDC_TEXT_STYLE_LABEL,IDC_ICON_STYLE_LABEL,IDC_CUSTOM_GLOW,IDC_GLOW_SIZE_LABEL,IDC_GLOW_STRENGTH_LABEL,IDC_GLOW_COLOR_LABEL};
+    localization_id_t strings[]={LOCALIZATION_ID_TEXT_STYLE,LOCALIZATION_ID_ICON_STYLE,LOCALIZATION_ID_CUSTOM_GLOW,LOCALIZATION_ID_GLOW_SIZE,LOCALIZATION_ID_GLOW_STRENGTH,LOCALIZATION_ID_GLOW_COLOR};
+    localization_id_t styles[]={LOCALIZATION_ID_STYLE_GLOW,LOCALIZATION_ID_STYLE_WHITE,LOCALIZATION_ID_STYLE_SHADOW,LOCALIZATION_ID_STYLE_BLACK};
+    int i;
+    for (i=0;i<6;i++) os_SetDlgItemText_localization_id(hwnd,labels[i],strings[i]);
+    os_ComboBox_AddString_localization_id(hwnd,IDC_ICON_STYLE,LOCALIZATION_ID_STYLE_ORIGINAL);
+    for (i=0;i<4;i++)
+    {
+        os_ComboBox_AddString_localization_id(hwnd,IDC_TEXT_STYLE,styles[i]);
+        os_ComboBox_AddString_localization_id(hwnd,IDC_ICON_STYLE,styles[i]);
+    }
+    ComboBox_SetCurSel(GetDlgItem(hwnd,IDC_TEXT_STYLE),style.text);
+    ComboBox_SetCurSel(GetDlgItem(hwnd,IDC_ICON_STYLE),style.icon);
+    CheckDlgButton(hwnd,IDC_CUSTOM_GLOW,style.custom ? BST_CHECKED : BST_UNCHECKED);
+    SendDlgItemMessage(hwnd,IDC_GLOW_SIZE_SPIN,UDM_SETRANGE32,1,12);
+    SendDlgItemMessage(hwnd,IDC_GLOW_STRENGTH_SPIN,UDM_SETRANGE32,0,100);
+    SendDlgItemMessage(hwnd,IDC_GLOW_SIZE_SLIDER,TBM_SETRANGE,TRUE,MAKELPARAM(1,12));
+    SendDlgItemMessage(hwnd,IDC_GLOW_STRENGTH_SLIDER,TBM_SETRANGE,TRUE,MAKELPARAM(0,100));
+    SetDlgItemInt(hwnd,IDC_GLOW_SIZE,style.size,FALSE);
+    SetDlgItemInt(hwnd,IDC_GLOW_STRENGTH,style.strength,FALSE);
+    SetWindowLongPtr(GetDlgItem(hwnd,IDC_GLOW_COLOR),GWLP_USERDATA,style.color);
+    appearance_page_update(hwnd);
+}
+
+static int appearance_page_save(HWND hwnd)
+{
+    appearance_style_t style=appearance_page_read(hwnd);
+    if ((style.icon==1 || (style.text==0 && style.custom)) && !glow_available())
+    {
+        WCHAR message[STRING_SIZE];
+        string_copy_utf8_string(message,localization_get_string(LOCALIZATION_ID_GLOW_UNAVAILABLE));
+        MessageBoxW(hwnd,message,L"void Image Viewer",MB_OK|MB_ICONERROR);
+        return 0;
+    }
+    config_text_style=style.text; config_icon_style=style.icon;
+    config_custom_glow=style.custom; config_glow_size=style.size;
+    config_glow_strength=style.strength; config_glow_color=style.color;
+    return 1;
+}
+
+static int appearance_page_draw(HWND hwnd,DRAWITEMSTRUCT *draw)
+{
+    appearance_style_t style=appearance_page_read(hwnd);
+    if (draw->CtlID==IDC_GLOW_COLOR)
+    {
+        RECT rect=draw->rcItem;
+        HBRUSH brush;
+        DrawFrameControl(draw->hDC,&rect,DFC_BUTTON,DFCS_BUTTONPUSH | ((draw->itemState&ODS_SELECTED) ? DFCS_PUSHED : 0));
+        InflateRect(&rect,-4,-4);
+        brush=CreateSolidBrush((draw->itemState&ODS_DISABLED) ? RGB(105,105,105) : style.color);
+        FillRect(draw->hDC,&rect,brush);
+        DeleteObject(brush);
+        FrameRect(draw->hDC,&rect,GetSysColorBrush(COLOR_3DSHADOW));
+        if (draw->itemState&ODS_FOCUS) { rect=draw->rcItem; InflateRect(&rect,-2,-2); DrawFocusRect(draw->hDC,&rect); }
+        return 1;
+    }
+    if (draw->CtlID==IDC_GLOW_PREVIEW)
+    {
+        appearance_buffer_t buffer;
+        RECT text;
+        WCHAR label[STRING_SIZE];
+        int x,y,i,icon_size=MulDiv(16,os_logical_high,96);
+        int icons[]={IDI_PREV,IDI_PLAY,IDI_BESTFIT};
+        if (!appearance_begin(draw->hDC,&draw->rcItem,&buffer,1)) return 1;
+        for (y=0;y<buffer.height;y++) for (x=0;x<buffer.width;x++)
+        {
+            DWORD r=170-130*x/buffer.width,g=190-135*x/buffer.width,b=210-140*x/buffer.width;
+            buffer.pixels[y*buffer.width+x]=0xff000000|(r<<16)|(g<<8)|b;
+        }
+        SelectObject(buffer.dc,(HFONT)SendMessage(hwnd,WM_GETFONT,0,0));
+        SetRect(&text,MulDiv(12,os_logical_wide,96),0,buffer.width/2,buffer.height);
+        string_copy_utf8_string(label,localization_get_string(LOCALIZATION_ID_GLOW_PREVIEW));
+        appearance_styled_text(hwnd,buffer.dc,label,&text,DT_LEFT|DT_VCENTER|DT_SINGLELINE,&style);
+        for (i=0;i<3;i++)
+        {
+            HICON icon=(HICON)LoadImage(os_hinstance,MAKEINTRESOURCE(icons[i]),IMAGE_ICON,icon_size,icon_size,LR_SHARED);
+            appearance_icon(buffer.dc,icon,buffer.width/2+i*(buffer.width/6),
+                (buffer.height-icon_size)/2,icon_size,icon_size,1,&style);
+        }
+        appearance_end(draw->hDC,&draw->rcItem,&buffer,0);
         return 1;
     }
     return 0;

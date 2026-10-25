@@ -101,6 +101,12 @@ extern BYTE config_options_last_page;
 extern BYTE config_color_mode; // 0=system, 1=light, 2=dark
 extern BYTE config_bottom_glass;
 extern BYTE config_menu_glass;
+extern BYTE config_text_style;
+extern BYTE config_icon_style;
+extern BYTE config_custom_glow;
+extern int config_glow_size;
+extern int config_glow_strength;
+extern DWORD config_glow_color;
 extern int config_short_jump;
 extern int config_medium_jump;
 extern int config_long_jump;

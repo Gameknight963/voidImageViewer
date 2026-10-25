@@ -302,4 +302,19 @@ static const utf8_t *_localization_string_array_en_us[LOCALIZATION_ID_COUNT] =
     "Enable &glass on the bottom bars", // LOCALIZATION_ID_BOTTOM_GLASS
     "Glass text automatically follows the color mode.", // LOCALIZATION_ID_GLASS_TEXT_NOTE
     "Enable glass on the &menu bar", // LOCALIZATION_ID_MENU_GLASS
+    "&Text style:", // LOCALIZATION_ID_TEXT_STYLE
+    "&Icon style:", // LOCALIZATION_ID_ICON_STYLE
+    "Black with glow", // LOCALIZATION_ID_STYLE_GLOW
+    "White", // LOCALIZATION_ID_STYLE_WHITE
+    "White with shadow", // LOCALIZATION_ID_STYLE_SHADOW
+    "Black", // LOCALIZATION_ID_STYLE_BLACK
+    "Original colors", // LOCALIZATION_ID_STYLE_ORIGINAL
+    "Use &custom glow effect", // LOCALIZATION_ID_CUSTOM_GLOW
+    "Direct2D renders a consistent glow for text and icons across Windows themes.", // LOCALIZATION_ID_GLOW_DESC_CUSTOM
+    "Native text glow follows your theme. Strength and color apply to icon glow.", // LOCALIZATION_ID_GLOW_DESC_NATIVE
+    "Glow si&ze (px):", // LOCALIZATION_ID_GLOW_SIZE
+    "Glow &strength (%):", // LOCALIZATION_ID_GLOW_STRENGTH
+    "Glow co&lor:", // LOCALIZATION_ID_GLOW_COLOR
+    "Preview", // LOCALIZATION_ID_GLOW_PREVIEW
+    "Custom glow is unavailable. Choose native text glow and an icon style without glow.", // LOCALIZATION_ID_GLOW_UNAVAILABLE
 };
